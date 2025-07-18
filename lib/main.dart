@@ -1,125 +1,304 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'settings_screen.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(GymTrackerApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+// === SETTINGS CONTROLLER ===
 
-  // This widget is the root of your application.
+enum WeightUnit { metric, imperial }
+enum CardioUnit { km, miles, feet }
+
+class Settings extends ChangeNotifier {
+  ThemeMode themeMode = ThemeMode.light;
+  WeightUnit weightUnit = WeightUnit.metric;
+  CardioUnit cardioUnit = CardioUnit.km;
+
+  void toggleTheme(bool isDark) {
+    themeMode = isDark ? ThemeMode.dark : ThemeMode.light;
+    notifyListeners();
+  }
+
+  void setWeightUnit(WeightUnit unit) {
+    weightUnit = unit;
+    notifyListeners();
+  }
+
+  void setCardioUnit(CardioUnit unit) {
+    cardioUnit = unit;
+    notifyListeners();
+  }
+}
+
+
+// === MAIN APP ===
+
+class GymTrackerApp extends StatefulWidget {
+  @override
+  State<GymTrackerApp> createState() => _GymTrackerAppState();
+}
+
+class _GymTrackerAppState extends State<GymTrackerApp> {
+  final settings = Settings();
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+    return AnimatedBuilder(
+      animation: settings,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Gym Tracker',
+          themeMode: settings.themeMode,
+          theme: ThemeData.light(),
+          darkTheme: ThemeData.dark(),
+          home: MainScreen(settings: settings),
+        );
+      },
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+// === MAIN SCREEN ===
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class MainScreen extends StatefulWidget {
+  final Settings settings;
+  const MainScreen({super.key, required this.settings});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _MainScreenState extends State<MainScreen> {
+  DateTime selectedDate = DateTime.now();
+  final Map<String, List<String>> exercisesPerDay = {};
+  final Set<String> previousExerciseNames = {};
 
-  void _incrementCounter() {
+  void _changeDay(int offset) {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      selectedDate = selectedDate.add(Duration(days: offset));
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+  String _dateKey(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
+
+  String _getFriendlyDateLabel(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final diff = target.difference(today).inDays;
+
+    if (diff == 0) return "Today";
+    if (diff == -1) return "Yesterday";
+    if (diff == 1) return "Tomorrow";
+    return DateFormat('MMM d').format(date);
+  }
+
+  void _addExercise() async {
+    final summary = await _showAddExerciseDialog(context);
+    if (summary != null && summary.isNotEmpty) {
+      final key = _dateKey(selectedDate);
+      final name = summary.split(" - ").first;
+      setState(() {
+        exercisesPerDay.putIfAbsent(key, () => []).add(summary);
+        previousExerciseNames.add(name);
+      });
+    }
+  }
+
+  Future<String?> _showAddExerciseDialog(BuildContext context) async {
+    String? selectedType;
+    final nameController = TextEditingController();
+    final weightController = TextEditingController();
+    final setsController = TextEditingController();
+    final distanceController = TextEditingController();
+    final timeController = TextEditingController();
+
+    final weightUnit = widget.settings.weightUnit;
+    final cardioUnit = widget.settings.cardioUnit;
+
+
+    return await showDialog<String>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text("Add Exercise"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButton<String>(
+                  value: selectedType,
+                  hint: Text("Select type"),
+                  isExpanded: true,
+                  items: ["Weightlifting", "Cardio"]
+                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .toList(),
+                  onChanged: (val) => setState(() => selectedType = val),
+                ),
+                SizedBox(height: 10),
+                Autocomplete<String>(
+                  optionsBuilder: (TextEditingValue textEditingValue) {
+                    if (textEditingValue.text == '') {
+                      return const Iterable<String>.empty();
+                    }
+                    return previousExerciseNames.where((String option) {
+                      return option
+                          .toLowerCase()
+                          .contains(textEditingValue.text.toLowerCase());
+                    });
+                  },
+                  fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                    controller.text = nameController.text;
+                    return TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      decoration: InputDecoration(labelText: "Exercise Name"),
+                      onChanged: (val) => nameController.text = val,
+                    );
+                  },
+                  onSelected: (String selection) {
+                    nameController.text = selection;
+                  },
+                ),
+                if (selectedType == "Weightlifting") ...[
+                  TextField(
+                    controller: weightController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: "Weight (${weightUnit == WeightUnit.metric ? "kg" : "lbs"})",
+
+                    ),
+                  ),
+                  TextField(
+                    controller: setsController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(labelText: "Sets"),
+                  ),
+                ],
+                if (selectedType == "Cardio") ...[
+                  TextField(
+                    controller: distanceController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: "Distance (${cardioUnit == CardioUnit.km ? "km" : cardioUnit == CardioUnit.miles ? "miles" : "feet"})",
+
+                    ),
+                  ),
+                  TextField(
+                    controller: timeController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(labelText: "Time (min)"),
+                  ),
+                ]
+              ],
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (selectedType == null || nameController.text.trim().isEmpty) {
+                  Navigator.pop(context, null);
+                  return;
+                }
+
+                final name = nameController.text.trim();
+                String summary = "";
+
+                if (selectedType == "Weightlifting") {
+                  final weight = weightController.text;
+                  final sets = setsController.text;
+                  summary = "$name - ${weight}${weightUnit == WeightUnit.metric ? "kg" : "lbs"} x ${sets} sets";
+
+                } else {
+                  final dist = distanceController.text;
+                  final time = timeController.text;
+                  String cardioUnitLabel = cardioUnit == CardioUnit.km
+                      ? "km"
+                      : cardioUnit == CardioUnit.miles
+                      ? "mi"
+                      : "ft";
+                  summary = "$name - ${dist}$cardioUnitLabel in ${time}min";
+                }
+
+                Navigator.pop(context, summary);
+              },
+              child: Text("Add"),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final key = _dateKey(selectedDate);
+    final exercises = exercisesPerDay[key] ?? [];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Spacer(),
+            IconButton(
+              icon: Icon(Icons.settings),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsScreen(settings: widget.settings),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        automaticallyImplyLeading: false,
+        toolbarHeight: 50,
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.chevron_left),
+                  onPressed: () => _changeDay(-1),
+                ),
+                Text(
+                  _getFriendlyDateLabel(selectedDate),
+                  style: TextStyle(fontSize: 18),
+                ),
+                IconButton(
+                  icon: Icon(Icons.chevron_right),
+                  onPressed: () => _changeDay(1),
+                ),
+              ],
+            ),
+          ),
+          Divider(),
+          Expanded(
+            child: exercises.isEmpty
+                ? Center(child: Text("No exercises yet. Tap + to add."))
+                : ListView.builder(
+              itemCount: exercises.length,
+              itemBuilder: (_, index) => ListTile(
+                leading: Icon(Icons.fitness_center),
+                title: Text(exercises[index]),
+              ),
+            ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+        onPressed: _addExercise,
+        child: Icon(Icons.add),
+        tooltip: "Add Exercise",
+      ),
     );
   }
 }
