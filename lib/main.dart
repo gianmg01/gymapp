@@ -69,6 +69,9 @@ class _MainScreenState extends State<MainScreen> {
   final Set<String> previousNames = {};
   int supersetCounter = 1;
 
+  // Map from children‐name‐sequence key to superset name
+  final Map<String, String> supNameByKey = {};
+
   String _friendly(DateTime d) {
     final now = DateTime.now();
     final t0 = DateTime(now.year, now.month, now.day);
@@ -80,6 +83,24 @@ class _MainScreenState extends State<MainScreen> {
     return DateFormat('MMM d').format(d);
   }
 
+  // Generate a key for a superset's children by their base names
+  String _childrenKey(List<ExerciseLeaf> children) {
+    return children
+        .map((e) => e.summary.split(' - ').first)
+        .join('|');
+  }
+
+  // Update or assign a superset name based on existing patterns
+  void _updateSupersetName(Superset sup) {
+    final key = _childrenKey(sup.children);
+    if (supNameByKey.containsKey(key)) {
+      sup.name = supNameByKey[key]!;
+    } else {
+      supNameByKey[key] = sup.name;
+    }
+  }
+
+  // Remove a node from wherever it lives
   void _removeNode(ExerciseNode node) {
     if (node is Superset) {
       items.remove(node);
@@ -123,7 +144,11 @@ class _MainScreenState extends State<MainScreen> {
         ),
       );
       if (renamed != null && renamed.isNotEmpty) {
-        setState(() => node.name = renamed);
+        setState(() {
+          node.name = renamed;
+          // update map so future matches adopt this name
+          supNameByKey[_childrenKey(node.children)] = renamed;
+        });
       }
     }
   }
@@ -145,7 +170,8 @@ class _MainScreenState extends State<MainScreen> {
       final rest = parts.length > 1 ? parts[1] : '';
       if (rest.contains('sets')) {
         type = 'Weightlifting';
-        final m = RegExp(r"(\d+)(kg|lbs) x (\d+) sets").firstMatch(rest);
+        final m =
+        RegExp(r"(\d+)(kg|lbs) x (\d+) sets").firstMatch(rest);
         if (m != null) {
           weightCtrl.text = m.group(1)!;
           setsCtrl.text = m.group(3)!;
@@ -183,8 +209,9 @@ class _MainScreenState extends State<MainScreen> {
               Autocomplete<String>(
                 optionsBuilder: (te) => te.text.isEmpty
                     ? []
-                    : previousNames.where((o) =>
-                    o.toLowerCase().contains(te.text.toLowerCase())),
+                    : previousNames.where((o) => o
+                    .toLowerCase()
+                    .contains(te.text.toLowerCase())),
                 fieldViewBuilder: (c, ctrl, fn, fs) {
                   ctrl.text = nameCtrl.text;
                   return TextField(
@@ -270,8 +297,7 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  /// Builds a drag‑target gap. If [sup] is non‑null, dropping inside
-  /// will reorder or insert into that superset.
+  /// Builds the drag‑target gap. Handles both top‑level and superset contexts.
   Widget _buildGap(int index,
       {Superset? sup, int? childIndex}) {
     return DragTarget<ExerciseNode>(
@@ -283,14 +309,17 @@ class _MainScreenState extends State<MainScreen> {
             if (inThisSup) {
               // reorder within sup
               sup.children.remove(node);
-              final at = childIndex!.clamp(0, sup.children.length);
+              final at = childIndex!.clamp(
+                  0, sup.children.length);
               sup.children.insert(at, node);
             } else {
               // move from outside into sup
               _removeNode(node);
-              final at = childIndex!.clamp(0, sup.children.length);
+              final at = childIndex!.clamp(
+                  0, sup.children.length);
               sup.children.insert(at, node);
             }
+            _updateSupersetName(sup);
           } else {
             // top‑level reorder/ungroup
             _removeNode(node);
@@ -307,7 +336,7 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  /// Wraps a node in a Draggable.
+  /// Wraps a node in a LongPressDraggable.
   Widget _buildDraggable(ExerciseNode node,
       {bool insideSup = false}) {
     return LongPressDraggable<ExerciseNode>(
@@ -323,8 +352,7 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  /// Builds the UI tile for a leaf or superset. If [insideSup] is true,
-  /// leaf summaries hide their “x N sets” suffix.
+  /// Builds a tile for a leaf or superset; hides child‑leaf sets if insideSup.
   Widget _buildNodeTile(ExerciseNode node,
       {bool insideSup = false}) {
     if (node is Superset) {
@@ -339,13 +367,14 @@ class _MainScreenState extends State<MainScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Superset header (drop here to add leaves)
+            // Superset header
             DragTarget<ExerciseNode>(
               onWillAccept: (d) => d is ExerciseLeaf,
               onAccept: (d) {
                 setState(() {
                   _removeNode(d);
                   node.children.add(d as ExerciseLeaf);
+                  _updateSupersetName(node);
                 });
               },
               builder: (ctx, cand, rej) => Row(
@@ -380,7 +409,7 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
 
-            // Children + gaps for reordering inside sup
+            // Children + gaps
             for (int j = 0; j <= node.children.length; j++) ...[
               _buildGap(supIndex + 1 + j,
                   sup: node, childIndex: j),
@@ -389,7 +418,7 @@ class _MainScreenState extends State<MainScreen> {
                     insideSup: true),
             ],
 
-            // Editable sets count
+            // Editable superset sets
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -405,6 +434,7 @@ class _MainScreenState extends State<MainScreen> {
                     onSubmitted: (v) {
                       setState(() =>
                       node.sets = int.tryParse(v) ?? node.sets);
+                      _updateSupersetName(node);
                     },
                     decoration: InputDecoration(
                       isDense: true,
@@ -420,7 +450,7 @@ class _MainScreenState extends State<MainScreen> {
         ),
       );
     } else {
-      // Standalone leaf (also a drop-target to form a new superset)
+      // Standalone leaf (also drop target for new superset)
       final leaf = node as ExerciseLeaf;
       final displayText = insideSup
           ? leaf.summary.replaceAll(RegExp(r' x \d+ sets'), '')
@@ -434,12 +464,13 @@ class _MainScreenState extends State<MainScreen> {
               final idx = items.indexOf(leaf);
               _removeNode(d);
               _removeNode(leaf);
-              final sup = Superset(
+              final newSup = Superset(
                   'sup${supersetCounter}',
                   'Superset ${supersetCounter}',
                   children: [d as ExerciseLeaf, leaf]);
               supersetCounter++;
-              items.insert(idx.clamp(0, items.length), sup);
+              _updateSupersetName(newSup);
+              items.insert(idx.clamp(0, items.length), newSup);
             });
           },
           builder: (ctx, cand, rej) => Container(
