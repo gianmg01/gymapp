@@ -14,19 +14,20 @@ class _CalendarScreenState extends State<CalendarScreen> {
   DateTime displayedMonth = DateTime.now();
   final DateTime today = DateTime.now();
 
-  // Helpers to detect today
   bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  // Detect weightlifting by presence of "sets" in the summary
+  // Now counts any summary containing "sets" OR "reps"
   bool _hasWeight(DateTime day) {
     final key = DateFormat('yyyy-MM-dd').format(day);
     if (!widget.exercisesPerDay.containsKey(key)) return false;
     return widget.exercisesPerDay[key]!
-        .any((s) => s.toLowerCase().contains('sets'));
+        .any((s) {
+      final low = s.toLowerCase();
+      return low.contains('sets') || low.contains('reps');
+    });
   }
 
-  // Detect cardio by presence of " in " in the summary
   bool _hasCardio(DateTime day) {
     final key = DateFormat('yyyy-MM-dd').format(day);
     if (!widget.exercisesPerDay.containsKey(key)) return false;
@@ -34,7 +35,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
         .any((s) => s.toLowerCase().contains(' in '));
   }
 
-  // Build all the day cells (including weekday headers)
   List<Widget> _buildCalendarDays() {
     final year = displayedMonth.year;
     final month = displayedMonth.month;
@@ -44,7 +44,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     List<Widget> cells = [];
 
-    // Weekday headers
     const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     for (var wd in weekDays) {
       cells.add(Center(
@@ -52,12 +51,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
       ));
     }
 
-    // Leading empties
     for (var i = 0; i < startOffset; i++) {
       cells.add(Container());
     }
 
-    // Day cells
     for (var d = 1; d <= daysInMonth; d++) {
       final date = DateTime(year, month, d);
       final isToday = _isSameDay(date, today);
@@ -94,7 +91,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           width: 6,
                           height: 6,
                           decoration: BoxDecoration(
-                            color: Colors.blue,
+                            color: Colors.lightBlue,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -120,7 +117,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return cells;
   }
 
-  // Change the displayed month
   void _changeMonth(int delta) {
     setState(() {
       displayedMonth =
@@ -134,9 +130,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        // hide default title bar content
         title: SizedBox.shrink(),
-        // put arrows + month into the bottom area
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(60),
           child: Padding(
