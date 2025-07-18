@@ -17,17 +17,18 @@ abstract class ExerciseNode {
 
 class ExerciseLeaf extends ExerciseNode {
   String summary;
-  ExerciseLeaf(String id, this.summary) : super(id);
+  ExerciseLeaf(this.summary)
+      : super(DateTime.now().toIso8601String());
 }
 
 class Superset extends ExerciseNode {
   String name;
   int sets;
   List<ExerciseLeaf> children;
-  Superset(String id, this.name,
+  Superset(this.name,
       {this.sets = 1, List<ExerciseLeaf>? children})
       : children = children ?? [],
-        super(id);
+        super(DateTime.now().toIso8601String());
 }
 
 // --- App entrypoint ---
@@ -40,6 +41,7 @@ class GymTrackerApp extends StatefulWidget {
 
 class _GymTrackerAppState extends State<GymTrackerApp> {
   final settings = Settings();
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -55,10 +57,10 @@ class _GymTrackerAppState extends State<GymTrackerApp> {
   }
 }
 
-// --- MainScreen ---
 class MainScreen extends StatefulWidget {
   final Settings settings;
-  const MainScreen({Key? key, required this.settings}) : super(key: key);
+  const MainScreen({Key? key, required this.settings})
+      : super(key: key);
   @override
   _MainScreenState createState() => _MainScreenState();
 }
@@ -66,11 +68,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   DateTime selectedDate = DateTime.now();
   List<ExerciseNode> items = [];
-  final Set<String> previousNames = {};
   int supersetCounter = 1;
-
-  // Map from children‐name‐sequence key to superset name
-  final Map<String, String> supNameByKey = {};
 
   String _friendly(DateTime d) {
     final now = DateTime.now();
@@ -83,24 +81,6 @@ class _MainScreenState extends State<MainScreen> {
     return DateFormat('MMM d').format(d);
   }
 
-  // Generate a key for a superset's children by their base names
-  String _childrenKey(List<ExerciseLeaf> children) {
-    return children
-        .map((e) => e.summary.split(' - ').first)
-        .join('|');
-  }
-
-  // Update or assign a superset name based on existing patterns
-  void _updateSupersetName(Superset sup) {
-    final key = _childrenKey(sup.children);
-    if (supNameByKey.containsKey(key)) {
-      sup.name = supNameByKey[key]!;
-    } else {
-      supNameByKey[key] = sup.name;
-    }
-  }
-
-  // Remove a node from wherever it lives
   void _removeNode(ExerciseNode node) {
     if (node is Superset) {
       items.remove(node);
@@ -122,12 +102,10 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _editNode(ExerciseNode node) async {
     if (node is ExerciseLeaf) {
-      final newSum = await _showAdd(existing: node);
-      if (newSum != null && newSum.isNotEmpty) {
-        setState(() {
-          node.summary = newSum;
-          previousNames.add(newSum.split(' - ').first);
-        });
+      final newSum =
+      await _showAdd(existing: node.summary);
+      if (newSum != null) {
+        setState(() => node.summary = newSum);
       }
     } else if (node is Superset) {
       final ctrl = TextEditingController(text: node.name);
@@ -139,50 +117,64 @@ class _MainScreenState extends State<MainScreen> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(c, ctrl.text),
-                child: Text('OK')),
+                child: Text('OK'))
           ],
         ),
       );
       if (renamed != null && renamed.isNotEmpty) {
-        setState(() {
-          node.name = renamed;
-          // update map so future matches adopt this name
-          supNameByKey[_childrenKey(node.children)] = renamed;
-        });
+        setState(() => node.name = renamed);
       }
     }
   }
 
-  Future<String?> _showAdd({ExerciseLeaf? existing}) async {
-    String? type;
-    final nameCtrl = TextEditingController(
-        text: existing?.summary.split(' - ').first ?? '');
+  Future<String?> _showAdd({String? existing}) {
+    String? type; // “Weightlifting” or “Cardio”
+    bool dynamic = false;
+
+    // Controllers
+    final nameCtrl = TextEditingController();
     final weightCtrl = TextEditingController();
+    final repsCtrl = TextEditingController();
     final setsCtrl = TextEditingController();
+    final dynCtrl = TextEditingController();
     final distCtrl = TextEditingController();
     final timeCtrl = TextEditingController();
-    final wU = widget.settings.weightUnit;
-    final cU = widget.settings.cardioUnit;
 
+    // Pre‐select type and fields if editing
     if (existing != null) {
-      final parts = existing.summary.split(' - ');
-      nameCtrl.text = parts[0];
-      final rest = parts.length > 1 ? parts[1] : '';
-      if (rest.contains('sets')) {
-        type = 'Weightlifting';
-        final m =
-        RegExp(r"(\d+)(kg|lbs) x (\d+) sets").firstMatch(rest);
-        if (m != null) {
-          weightCtrl.text = m.group(1)!;
-          setsCtrl.text = m.group(3)!;
-        }
-      } else if (rest.contains('in')) {
+      final lines = existing.split('\n');
+      final header = lines.first;
+      if (header.contains(' in ')) {
         type = 'Cardio';
-        final m =
-        RegExp(r"(\d+)(km|miles|feet) in (.+)").firstMatch(rest);
-        if (m != null) {
-          distCtrl.text = m.group(1)!;
-          timeCtrl.text = m.group(3)!;
+        final parts = header.split(' - ');
+        nameCtrl.text = parts[0];
+        final distMatch =
+        RegExp(r' - ([\d.]+)').firstMatch(parts[1]);
+        if (distMatch != null) distCtrl.text = distMatch.group(1)!;
+        final timeMatch =
+        RegExp(r'in (.+)$').firstMatch(header);
+        if (timeMatch != null) timeCtrl.text = timeMatch.group(1)!;
+      } else {
+        type = 'Weightlifting';
+        dynamic = lines.length > 1;
+        final parts = header.split(' - ');
+        nameCtrl.text = parts[0];
+        final wtMatch =
+        RegExp(r' - ([\d.]+)(kg|lbs)').firstMatch(header);
+        if (wtMatch != null) weightCtrl.text = wtMatch.group(1)!;
+        if (!dynamic && parts.length >= 3) {
+          final repMatch =
+          RegExp(r'(\d+)\s*reps').firstMatch(parts[2]);
+          if (repMatch != null) repsCtrl.text = repMatch.group(1)!;
+          final setMatch =
+          RegExp(r'x\s*(\d+)\s*sets').firstMatch(parts[2]);
+          if (setMatch != null) setsCtrl.text = setMatch.group(1)!;
+        }
+        if (dynamic) {
+          dynCtrl.text = lines
+              .sublist(1)
+              .map((l) => l.replaceFirst(RegExp(r'^Set \d+:\s*'), ''))
+              .join('\n');
         }
       }
     }
@@ -197,59 +189,76 @@ class _MainScreenState extends State<MainScreen> {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButton<String>(
                 value: type,
-                hint: Text('Type'),
+                hint: Text('Select type'),
                 isExpanded: true,
                 items: ['Weightlifting', 'Cardio']
-                    .map((e) =>
-                    DropdownMenuItem(value: e, child: Text(e)))
+                    .map((e) => DropdownMenuItem(
+                    value: e, child: Text(e)))
                     .toList(),
                 onChanged: (v) => setSt(() => type = v),
               ),
-              SizedBox(height: 8),
-              Autocomplete<String>(
-                optionsBuilder: (te) => te.text.isEmpty
-                    ? []
-                    : previousNames.where((o) => o
-                    .toLowerCase()
-                    .contains(te.text.toLowerCase())),
-                fieldViewBuilder: (c, ctrl, fn, fs) {
-                  ctrl.text = nameCtrl.text;
-                  return TextField(
-                    controller: ctrl,
-                    focusNode: fn,
-                    decoration: InputDecoration(labelText: 'Name'),
-                    onChanged: (v) => nameCtrl.text = v,
-                  );
-                },
-                onSelected: (sel) => nameCtrl.text = sel,
-              ),
-              if (type == 'Weightlifting') ...[
+              if (type != null) ...[
+                SizedBox(height: 8),
                 TextField(
-                  controller: weightCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                      labelText:
-                      'Weight (${wU == WeightUnit.metric ? 'kg' : 'lbs'})'),
-                ),
-                TextField(
-                  controller: setsCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(labelText: 'Sets'),
-                ),
-              ],
-              if (type == 'Cardio') ...[
-                TextField(
-                  controller: distCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                      labelText:
-                      'Distance (${cU == CardioUnit.km ? 'km' : cU == CardioUnit.miles ? 'miles' : 'feet'})'),
-                ),
-                TextField(
-                  controller: timeCtrl,
+                  controller: nameCtrl,
                   decoration:
-                  InputDecoration(labelText: 'Time (e.g. 30 min)'),
+                  InputDecoration(labelText: 'Exercise Name'),
                 ),
+
+                SizedBox(height: 8),
+                if (type == 'Weightlifting') ...[
+                  TextField(
+                    controller: weightCtrl,
+                    keyboardType:
+                    TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText:
+                      'Weight (${widget.settings.weightUnit == WeightUnit.metric ? 'kg' : 'lbs'})',
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  SwitchListTile(
+                    title: Text('Dynamic reps'),
+                    value: dynamic,
+                    onChanged: (v) => setSt(() => dynamic = v),
+                  ),
+                  if (!dynamic) ...[
+                    TextField(
+                      controller: repsCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration:
+                      InputDecoration(labelText: 'Reps'),
+                    ),
+                    SizedBox(height: 8),
+                    TextField(
+                      controller: setsCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration:
+                      InputDecoration(labelText: 'Sets'),
+                    ),
+                  ] else ...[
+                    TextField(
+                      controller: dynCtrl,
+                      decoration: InputDecoration(
+                          labelText: 'Reps per set (one per line)'),
+                      keyboardType: TextInputType.multiline,
+                      maxLines: null,
+                    ),
+                  ],
+                ] else ...[
+                  TextField(
+                    controller: distCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration:
+                    InputDecoration(labelText: 'Distance'),
+                  ),
+                  SizedBox(height: 8),
+                  TextField(
+                    controller: timeCtrl,
+                    decoration:
+                    InputDecoration(labelText: 'Time (e.g. 30 min)'),
+                  ),
+                ],
               ],
             ]),
           ),
@@ -262,20 +271,39 @@ class _MainScreenState extends State<MainScreen> {
                   return;
                 }
                 final name = nameCtrl.text.trim();
-                String sum;
+                String result;
                 if (type == 'Weightlifting') {
-                  sum =
-                  '$name - ${weightCtrl.text}${wU == WeightUnit.metric ? 'kg' : 'lbs'} x ${setsCtrl.text} sets';
+                  final wt = weightCtrl.text.trim();
+                  final unit = widget.settings.weightUnit ==
+                      WeightUnit.metric
+                      ? 'kg'
+                      : 'lbs';
+                  if (!dynamic) {
+                    final r = repsCtrl.text.trim();
+                    final s = setsCtrl.text.trim();
+                    result =
+                    '$name - ${wt}${unit} - $r reps x $s sets';
+                  } else {
+                    final reps = dynCtrl.text
+                        .split('\n')
+                        .map((l) => l.trim())
+                        .where((l) => l.isNotEmpty)
+                        .toList();
+                    final header = '$name - ${wt}${unit}';
+                    final body = reps
+                        .asMap()
+                        .entries
+                        .map((e) =>
+                    'Set ${e.key + 1}: ${e.value} reps')
+                        .join('\n');
+                    result = '$header\n$body';
+                  }
                 } else {
-                  final unit = cU == CardioUnit.km
-                      ? 'km'
-                      : cU == CardioUnit.miles
-                      ? 'miles'
-                      : 'feet';
-                  sum =
-                  '$name - ${distCtrl.text}$unit in ${timeCtrl.text}';
+                  final d = distCtrl.text.trim();
+                  final t = timeCtrl.text.trim();
+                  result = '$name - $d km in $t';
                 }
-                Navigator.pop(ctx, sum);
+                Navigator.pop(ctx, result);
               },
               child: Text(existing != null ? 'Save' : 'Add'),
             )
@@ -287,56 +315,44 @@ class _MainScreenState extends State<MainScreen> {
 
   void _add() async {
     final sum = await _showAdd();
-    if (sum != null && sum.isNotEmpty) {
-      setState(() {
-        final leaf =
-        ExerciseLeaf('leaf${DateTime.now().millisecondsSinceEpoch}', sum);
-        items.add(leaf);
-        previousNames.add(sum.split(' - ').first);
-      });
+    if (sum != null) {
+      setState(() => items.add(ExerciseLeaf(sum)));
     }
   }
 
-  /// Builds the drag‑target gap. Handles both top‑level and superset contexts.
-  Widget _buildGap(int index,
+  Widget _buildGap(int idx,
       {Superset? sup, int? childIndex}) {
     return DragTarget<ExerciseNode>(
       onWillAccept: (_) => true,
       onAccept: (node) {
         setState(() {
           if (sup != null && node is ExerciseLeaf) {
-            final inThisSup = sup.children.contains(node);
-            if (inThisSup) {
-              // reorder within sup
+            final inSup = sup.children.contains(node);
+            if (inSup) {
               sup.children.remove(node);
-              final at = childIndex!.clamp(
-                  0, sup.children.length);
-              sup.children.insert(at, node);
+              sup.children.insert(
+                  childIndex!.clamp(0, sup.children.length),
+                  node);
             } else {
-              // move from outside into sup
               _removeNode(node);
-              final at = childIndex!.clamp(
-                  0, sup.children.length);
-              sup.children.insert(at, node);
+              sup.children.insert(
+                  childIndex!.clamp(0, sup.children.length),
+                  node);
             }
-            _updateSupersetName(sup);
           } else {
-            // top‑level reorder/ungroup
             _removeNode(node);
-            items.insert(index.clamp(0, items.length), node);
+            items.insert(idx.clamp(0, items.length), node);
           }
         });
       },
       builder: (ctx, cand, rej) => Container(
         height: cand.isNotEmpty ? 20 : 6,
-        color: cand.isNotEmpty
-            ? Colors.blueAccent.withOpacity(0.3)
-            : null,
+        color:
+        cand.isNotEmpty ? Colors.blueAccent.withOpacity(0.3) : null,
       ),
     );
   }
 
-  /// Wraps a node in a LongPressDraggable.
   Widget _buildDraggable(ExerciseNode node,
       {bool insideSup = false}) {
     return LongPressDraggable<ExerciseNode>(
@@ -352,11 +368,10 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  /// Builds a tile for a leaf or superset; hides child‑leaf sets if insideSup.
   Widget _buildNodeTile(ExerciseNode node,
       {bool insideSup = false}) {
     if (node is Superset) {
-      final supIndex = items.indexOf(node);
+      final i = items.indexOf(node);
       return Container(
         margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
         padding: EdgeInsets.all(8),
@@ -367,14 +382,12 @@ class _MainScreenState extends State<MainScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Superset header
             DragTarget<ExerciseNode>(
               onWillAccept: (d) => d is ExerciseLeaf,
               onAccept: (d) {
                 setState(() {
                   _removeNode(d);
                   node.children.add(d as ExerciseLeaf);
-                  _updateSupersetName(node);
                 });
               },
               builder: (ctx, cand, rej) => Row(
@@ -408,17 +421,14 @@ class _MainScreenState extends State<MainScreen> {
                 ],
               ),
             ),
-
-            // Children + gaps
             for (int j = 0; j <= node.children.length; j++) ...[
-              _buildGap(supIndex + 1 + j,
+              _buildGap(i + 1 + j,
                   sup: node, childIndex: j),
               if (j < node.children.length)
                 _buildDraggable(node.children[j],
                     insideSup: true),
             ],
-
-            // Editable superset sets
+            // Editable sets field restored:
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -431,11 +441,9 @@ class _MainScreenState extends State<MainScreen> {
                         text: node.sets.toString()),
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
-                    onSubmitted: (v) {
-                      setState(() =>
-                      node.sets = int.tryParse(v) ?? node.sets);
-                      _updateSupersetName(node);
-                    },
+                    onSubmitted: (v) => setState(() =>
+                    node.sets =
+                        int.tryParse(v) ?? node.sets),
                     decoration: InputDecoration(
                       isDense: true,
                       contentPadding: EdgeInsets.symmetric(
@@ -450,27 +458,42 @@ class _MainScreenState extends State<MainScreen> {
         ),
       );
     } else {
-      // Standalone leaf (also drop target for new superset)
       final leaf = node as ExerciseLeaf;
-      final displayText = insideSup
-          ? leaf.summary.replaceAll(RegExp(r' x \d+ sets'), '')
-          : leaf.summary;
+      final parts = leaf.summary.split('\n');
+      final header = parts.first;
+      final rest =
+      parts.length > 1 ? parts.sublist(1) : null;
+
+      Widget content;
+      if (rest != null) {
+        content = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(header),
+            for (var line in rest)
+              Padding(
+                padding: EdgeInsets.only(left: 16),
+                child: Text(line),
+              ),
+          ],
+        );
+      } else {
+        content = Text(header);
+      }
+
       return Container(
         margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
         child: DragTarget<ExerciseNode>(
-          onWillAccept: (d) => d is ExerciseLeaf && d.id != leaf.id,
+          onWillAccept: (d) =>
+          d is ExerciseLeaf && d.id != leaf.id,
           onAccept: (d) {
             setState(() {
               final idx = items.indexOf(leaf);
               _removeNode(d);
               _removeNode(leaf);
-              final newSup = Superset(
-                  'sup${supersetCounter}',
-                  'Superset ${supersetCounter}',
+              final sup = Superset('Superset ${supersetCounter++}',
                   children: [d as ExerciseLeaf, leaf]);
-              supersetCounter++;
-              _updateSupersetName(newSup);
-              items.insert(idx.clamp(0, items.length), newSup);
+              items.insert(idx.clamp(0, items.length), sup);
             });
           },
           builder: (ctx, cand, rej) => Container(
@@ -484,11 +507,13 @@ class _MainScreenState extends State<MainScreen> {
             ),
             child: Row(
               children: [
-                Icon(displayText.toLowerCase().contains(' in ')
+                Icon(header
+                    .toLowerCase()
+                    .contains(' in ')
                     ? Icons.directions_run
                     : Icons.fitness_center),
                 SizedBox(width: 12),
-                Expanded(child: Text(displayText)),
+                Expanded(child: content),
                 PopupMenuButton<String>(
                   onSelected: (v) {
                     if (v == 'edit') _editNode(leaf);
@@ -530,23 +555,22 @@ class _MainScreenState extends State<MainScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           IconButton(
-            icon: Icon(Icons.chevron_left),
-            onPressed: () => setState(() =>
-            selectedDate = selectedDate.subtract(Duration(days: 1))),
-          ),
+              icon: Icon(Icons.chevron_left),
+              onPressed: () => setState(() =>
+              selectedDate = selectedDate
+                  .subtract(Duration(days: 1)))),
           Text(_friendly(selectedDate),
               style: TextStyle(fontSize: 18)),
           IconButton(
-            icon: Icon(Icons.chevron_right),
-            onPressed: () => setState(() =>
-            selectedDate = selectedDate.add(Duration(days: 1))),
-          ),
+              icon: Icon(Icons.chevron_right),
+              onPressed: () => setState(() =>
+              selectedDate = selectedDate
+                  .add(Duration(days: 1)))),
         ],
       ),
     ));
     rows.add(Divider());
 
-    // Build gaps + draggable items
     for (int i = 0; i <= items.length; i++) {
       rows.add(_buildGap(i));
       if (i < items.length) rows.add(_buildDraggable(items[i]));
@@ -566,7 +590,8 @@ class _MainScreenState extends State<MainScreen> {
                       CalendarScreen(exercisesPerDay: {}),
                 ),
               );
-              if (pick != null) setState(() => selectedDate = pick);
+              if (pick != null)
+                setState(() => selectedDate = pick);
             },
           ),
           Spacer(),
@@ -581,7 +606,8 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ]),
       ),
-      body: SingleChildScrollView(child: Column(children: rows)),
+      body:
+      SingleChildScrollView(child: Column(children: rows)),
       floatingActionButton: FloatingActionButton(
         onPressed: _add,
         child: Icon(Icons.add),
