@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'settings_screen.dart';
 import 'calendar_screen.dart';
@@ -39,6 +41,32 @@ class GymTrackerApp extends StatefulWidget {
 
 class _GymTrackerAppState extends State<GymTrackerApp> {
   final settings = Settings();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Theme
+    final isDark = prefs.getBool('settings.themeIsDark') ?? false;
+    settings.themeMode = isDark ? ThemeMode.dark : ThemeMode.light;
+    // Weight unit
+    final wu = prefs.getString('settings.weightUnit') ?? 'metric';
+    settings.weightUnit =
+    wu == 'imperial' ? WeightUnit.imperial : WeightUnit.metric;
+    // Cardio unit
+    final cu = prefs.getString('settings.cardioUnit') ?? 'km';
+    settings.cardioUnit = cu == 'miles'
+        ? CardioUnit.miles
+        : cu == 'feet'
+        ? CardioUnit.feet
+        : CardioUnit.km;
+    settings.notifyListeners();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -54,7 +82,6 @@ class _GymTrackerAppState extends State<GymTrackerApp> {
   }
 }
 
-// --- MainScreen ---
 class MainScreen extends StatefulWidget {
   final Settings settings;
   const MainScreen({Key? key, required this.settings}) : super(key: key);
@@ -64,10 +91,11 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   DateTime selectedDate = DateTime.now();
+  // Per‑day storage
   final Map<String, List<ExerciseNode>> exercisesPerDay = {};
   int supersetCounter = 1;
 
-  // Get the list for the current date, creating it if needed
+  // Convenience getter
   List<ExerciseNode> get items {
     final key = _dateKey(selectedDate);
     return exercisesPerDay.putIfAbsent(key, () => []);
@@ -86,10 +114,70 @@ class _MainScreenState extends State<MainScreen> {
     return DateFormat('MMM d').format(d);
   }
 
+  @override
+  void initState() {
+    super.initState();
+    _loadExercises();
+  }
+
+  Future<void> _loadExercises() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('exercises');
+    if (raw == null) return;
+    final Map<String, dynamic> jsonMap = jsonDecode(raw);
+    final Map<String, List<ExerciseNode>> loaded = {};
+    jsonMap.forEach((date, list) {
+      if (list is List) {
+        final nodes = <ExerciseNode>[];
+        for (var item in list) {
+          if (item['type'] == 'leaf') {
+            nodes.add(ExerciseLeaf(item['summary']));
+          } else {
+            final children = <ExerciseLeaf>[];
+            for (var s in item['children']) {
+              children.add(ExerciseLeaf(s));
+            }
+            nodes.add(Superset(item['name'],
+                sets: item['sets'], children: children));
+          }
+        }
+        loaded[date] = nodes;
+      }
+    });
+    setState(() {
+      exercisesPerDay.clear();
+      exercisesPerDay.addAll(loaded);
+    });
+  }
+
+  Future<void> _saveExercises() async {
+    final prefs = await SharedPreferences.getInstance();
+    final Map<String, List<Map<String, dynamic>>> jsonMap = {};
+    exercisesPerDay.forEach((date, list) {
+      jsonMap[date] = list.map((node) {
+        if (node is ExerciseLeaf) {
+          return {
+            'type': 'leaf',
+            'summary': node.summary,
+          };
+        } else {
+          final sup = node as Superset;
+          return {
+            'type': 'superset',
+            'name': sup.name,
+            'sets': sup.sets,
+            'children': sup.children.map((e) => e.summary).toList(),
+          };
+        }
+      }).toList();
+    });
+    await prefs.setString('exercises', jsonEncode(jsonMap));
+  }
+
   void _removeNode(ExerciseNode node) {
     if (node is Superset) {
       items.remove(node);
-    } else if (node is ExerciseLeaf) {
+    } else {
       for (var n in items.toList()) {
         if (n is Superset && n.children.contains(node)) {
           n.children.remove(node);
@@ -101,15 +189,22 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  void _deleteNode(ExerciseNode node) =>
-      setState(() => _removeNode(node));
+  void _deleteNode(ExerciseNode node) {
+    setState(() => _removeNode(node));
+    _saveExercises();
+  }
 
   Future<void> _editNode(ExerciseNode node) async {
     if (node is ExerciseLeaf) {
       final newSum = await _showAdd(existing: node.summary);
-      if (newSum != null) setState(() => node.summary = newSum);
-    } else if (node is Superset) {
-      final ctrl = TextEditingController(text: node.name);
+      if (newSum != null) {
+        setState(() => node.summary = newSum);
+        _saveExercises();
+      }
+    } else {
+      // Superset rename
+      final sup = node as Superset;
+      final ctrl = TextEditingController(text: sup.name);
       final renamed = await showDialog<String>(
         context: context,
         builder: (c) => AlertDialog(
@@ -123,7 +218,8 @@ class _MainScreenState extends State<MainScreen> {
         ),
       );
       if (renamed != null && renamed.isNotEmpty) {
-        setState(() => node.name = renamed);
+        setState(() => sup.name = renamed);
+        _saveExercises();
       }
     }
   }
@@ -131,7 +227,6 @@ class _MainScreenState extends State<MainScreen> {
   Future<String?> _showAdd({String? existing}) {
     String? type;
     bool dynamicReps = false, dynamicWeight = false;
-
     final nameCtrl = TextEditingController();
     final weightCtrl = TextEditingController();
     final repsCtrl = TextEditingController();
@@ -141,7 +236,6 @@ class _MainScreenState extends State<MainScreen> {
     final distCtrl = TextEditingController();
     final timeCtrl = TextEditingController();
 
-    // If editing, prefill type + fields
     if (existing != null) {
       final lines = existing.split('\n');
       final header = lines.first;
@@ -158,7 +252,6 @@ class _MainScreenState extends State<MainScreen> {
         final wtM =
         RegExp(r' - ([\d.]+)(kg|lbs)').firstMatch(header);
         if (wtM != null) weightCtrl.text = wtM.group(1)!;
-
         if (lines.length > 1) {
           dynamicReps =
               RegExp(r'Set \d+: .* reps').hasMatch(lines[1]);
@@ -276,8 +369,7 @@ class _MainScreenState extends State<MainScreen> {
                   SizedBox(height: 8),
                   TextField(
                     controller: timeCtrl,
-                    decoration:
-                    InputDecoration(labelText: 'Time'),
+                    decoration: InputDecoration(labelText: 'Time'),
                   ),
                 ],
               ],
@@ -293,7 +385,6 @@ class _MainScreenState extends State<MainScreen> {
                 }
                 final name = nameCtrl.text.trim();
                 String result;
-
                 if (type == 'Weightlifting') {
                   final unit = widget.settings.weightUnit ==
                       WeightUnit.metric
@@ -348,7 +439,6 @@ class _MainScreenState extends State<MainScreen> {
                   final t = timeCtrl.text.trim();
                   result = '$name - $d km in $t';
                 }
-
                 Navigator.pop(ctx, result);
               },
               child: Text(existing != null ? 'Save' : 'Add'),
@@ -361,7 +451,10 @@ class _MainScreenState extends State<MainScreen> {
 
   void _add() async {
     final sum = await _showAdd();
-    if (sum != null) setState(() => items.add(ExerciseLeaf(sum)));
+    if (sum != null) {
+      setState(() => items.add(ExerciseLeaf(sum)));
+      _saveExercises();
+    }
   }
 
   Widget _buildGap(int idx,
@@ -388,6 +481,7 @@ class _MainScreenState extends State<MainScreen> {
             items.insert(idx.clamp(0, items.length), node);
           }
         });
+        _saveExercises();
       },
       builder: (ctx, cand, rej) => Container(
         height: cand.isNotEmpty ? 20 : 6,
@@ -415,7 +509,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildNodeTile(ExerciseNode node,
       {bool insideSup = false}) {
     if (node is Superset) {
-      final idx = items.indexOf(node);
+      final idx0 = items.indexOf(node);
       return Container(
         margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
         padding: EdgeInsets.all(8),
@@ -428,31 +522,48 @@ class _MainScreenState extends State<MainScreen> {
           children: [
             DragTarget<ExerciseNode>(
               onWillAccept: (d) => d is ExerciseLeaf,
-              onAccept: (d) =>
-                  setState(() { _removeNode(d); node.children.add(d as ExerciseLeaf); }),
+              onAccept: (d) => setState(() {
+                _removeNode(d);
+                node.children.add(d as ExerciseLeaf);
+                _saveExercises();
+              }),
               builder: (ctx, cand, rej) => Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(node.name,
-                      style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
                   PopupMenuButton<String>(
                     onSelected: (v) {
                       if (v == 'edit') _editNode(node);
                       else _deleteNode(node);
                     },
                     itemBuilder: (_) => [
-                      PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit), SizedBox(width:8), Text('Edit')])),
-                      PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color:Colors.red), SizedBox(width:8), Text('Delete')])),
+                      PopupMenuItem(
+                          value: 'edit',
+                          child: Row(children: [
+                            Icon(Icons.edit),
+                            SizedBox(width: 8),
+                            Text('Edit')
+                          ])),
+                      PopupMenuItem(
+                          value: 'delete',
+                          child: Row(children: [
+                            Icon(Icons.delete, color: Colors.red),
+                            SizedBox(width: 8),
+                            Text('Delete')
+                          ])),
                     ],
                   ),
                 ],
               ),
             ),
             for (int j = 0; j <= node.children.length; j++) ...[
-              _buildGap(idx + 1 + j, sup: node, childIndex: j),
+              _buildGap(idx0 + 1 + j,
+                  sup: node, childIndex: j),
               if (j < node.children.length)
-                _buildDraggable(node.children[j], insideSup: true),
+                _buildDraggable(node.children[j],
+                    insideSup: true),
             ],
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -466,13 +577,16 @@ class _MainScreenState extends State<MainScreen> {
                         text: node.sets.toString()),
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
-                    onSubmitted: (v) => setState(() =>
-                    node.sets = int.tryParse(v) ?? node.sets),
+                    onSubmitted: (v) => setState(() {
+                      node.sets = int.tryParse(v) ?? node.sets;
+                      _saveExercises();
+                    }),
                     decoration: InputDecoration(
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                            vertical: 4, horizontal: 4),
-                        border: OutlineInputBorder()),
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                          vertical: 4, horizontal: 4),
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                 ),
               ],
@@ -508,17 +622,16 @@ class _MainScreenState extends State<MainScreen> {
         child: DragTarget<ExerciseNode>(
           onWillAccept: (d) =>
           d is ExerciseLeaf && d.id != leaf.id,
-          onAccept: (d) {
-            setState(() {
-              final idx = items.indexOf(leaf);
-              _removeNode(d);
-              _removeNode(leaf);
-              final sup = Superset(
-                  'Superset ${supersetCounter++}',
-                  children: [d as ExerciseLeaf, leaf]);
-              items.insert(idx.clamp(0, items.length), sup);
-            });
-          },
+          onAccept: (d) => setState(() {
+            final idx1 = items.indexOf(leaf);
+            _removeNode(d);
+            _removeNode(leaf);
+            final sup = Superset(
+                'Superset ${supersetCounter++}',
+                children: [d as ExerciseLeaf, leaf]);
+            items.insert(idx1.clamp(0, items.length), sup);
+            _saveExercises();
+          }),
           builder: (ctx, cand, rej) => Container(
             padding: EdgeInsets.all(8),
             decoration: BoxDecoration(
@@ -530,9 +643,7 @@ class _MainScreenState extends State<MainScreen> {
             ),
             child: Row(
               children: [
-                Icon(header
-                    .toLowerCase()
-                    .contains(' in ')
+                Icon(header.toLowerCase().contains(' in ')
                     ? Icons.directions_run
                     : Icons.fitness_center),
                 SizedBox(width: 12),
@@ -571,7 +682,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     final rows = <Widget>[];
 
-    // Date nav
+    // Date navigation
     rows.add(Padding(
       padding: EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -580,21 +691,21 @@ class _MainScreenState extends State<MainScreen> {
           IconButton(
               icon: Icon(Icons.chevron_left),
               onPressed: () => setState(() =>
-              selectedDate = selectedDate
-                  .subtract(Duration(days: 1)))),
+              selectedDate =
+                  selectedDate.subtract(Duration(days: 1)))),
           Text(_friendly(selectedDate),
               style: TextStyle(fontSize: 18)),
           IconButton(
               icon: Icon(Icons.chevron_right),
               onPressed: () => setState(() =>
-              selectedDate = selectedDate
-                  .add(Duration(days: 1)))),
+              selectedDate =
+                  selectedDate.add(Duration(days: 1)))),
         ],
       ),
     ));
     rows.add(Divider());
 
-    // List for today
+    // Build gaps + draggable items
     for (int i = 0; i <= items.length; i++) {
       rows.add(_buildGap(i));
       if (i < items.length) rows.add(_buildDraggable(items[i]));
@@ -607,7 +718,7 @@ class _MainScreenState extends State<MainScreen> {
           IconButton(
             icon: Icon(Icons.calendar_today),
             onPressed: () async {
-              // flatten both standalone leaves and superset children
+              // flatten leaves + sup children for the calendar
               final flatMap = exercisesPerDay.map((date, list) {
                 final allSummaries = <String>[];
                 for (var node in list) {
@@ -624,8 +735,8 @@ class _MainScreenState extends State<MainScreen> {
               final pick = await Navigator.push<DateTime>(
                 context,
                 MaterialPageRoute(
-                  builder: (_) =>
-                      CalendarScreen(exercisesPerDay: flatMap),
+                  builder: (_) => CalendarScreen(
+                      exercisesPerDay: flatMap),
                 ),
               );
               if (pick != null)
@@ -655,7 +766,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// --- Settings controller ---
+// --- Settings controller with persistence ---
 class Settings extends ChangeNotifier {
   ThemeMode themeMode = ThemeMode.light;
   WeightUnit weightUnit = WeightUnit.metric;
@@ -664,15 +775,39 @@ class Settings extends ChangeNotifier {
   void toggleTheme(bool isDark) {
     themeMode = isDark ? ThemeMode.dark : ThemeMode.light;
     notifyListeners();
+    _saveTheme();
   }
 
   void setWeightUnit(WeightUnit u) {
     weightUnit = u;
     notifyListeners();
+    _saveWeightUnit();
   }
 
   void setCardioUnit(CardioUnit u) {
     cardioUnit = u;
     notifyListeners();
+    _saveCardioUnit();
+  }
+
+  Future<void> _saveTheme() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setBool('settings.themeIsDark', themeMode == ThemeMode.dark);
+  }
+
+  Future<void> _saveWeightUnit() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setString('settings.weightUnit',
+        weightUnit == WeightUnit.metric ? 'metric' : 'imperial');
+  }
+
+  Future<void> _saveCardioUnit() async {
+    final prefs = await SharedPreferences.getInstance();
+    String s = cardioUnit == CardioUnit.km
+        ? 'km'
+        : cardioUnit == CardioUnit.miles
+        ? 'miles'
+        : 'feet';
+    prefs.setString('settings.cardioUnit', s);
   }
 }

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-
 class CalendarScreen extends StatefulWidget {
   final Map<String, List<String>> exercisesPerDay;
-
   const CalendarScreen({super.key, required this.exercisesPerDay});
 
   @override
@@ -18,12 +16,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
   bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  // Now counts any summary containing "sets" OR "reps"
+  // Now flags any summary containing "sets" OR "reps"
   bool _hasWeight(DateTime day) {
     final key = DateFormat('yyyy-MM-dd').format(day);
-    if (!widget.exercisesPerDay.containsKey(key)) return false;
-    return widget.exercisesPerDay[key]!
-        .any((s) {
+    final list = widget.exercisesPerDay[key];
+    if (list == null) return false;
+    return list.any((s) {
       final low = s.toLowerCase();
       return low.contains('sets') || low.contains('reps');
     });
@@ -31,9 +29,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   bool _hasCardio(DateTime day) {
     final key = DateFormat('yyyy-MM-dd').format(day);
-    if (!widget.exercisesPerDay.containsKey(key)) return false;
-    return widget.exercisesPerDay[key]!
-        .any((s) => s.toLowerCase().contains(' in '));
+    final list = widget.exercisesPerDay[key];
+    if (list == null) return false;
+    return list.any((s) => s.toLowerCase().contains(' in '));
   }
 
   List<Widget> _buildCalendarDays() {
@@ -42,7 +40,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final first = DateTime(year, month, 1);
     final daysInMonth = DateUtils.getDaysInMonth(year, month);
     final startOffset = first.weekday % 7;
-
     List<Widget> cells = [];
 
     const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -51,10 +48,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         child: Text(wd, style: TextStyle(fontWeight: FontWeight.bold)),
       ));
     }
-
-    for (var i = 0; i < startOffset; i++) {
-      cells.add(Container());
-    }
+    for (var i = 0; i < startOffset; i++) cells.add(Container());
 
     for (var d = 1; d <= daysInMonth; d++) {
       final date = DateTime(year, month, d);
@@ -88,17 +82,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     children: [
                       if (w)
                         Container(
-                          margin: EdgeInsets.symmetric(horizontal: 1, vertical: 2),
+                          margin:
+                          EdgeInsets.symmetric(horizontal: 1, vertical: 2),
                           width: 6,
                           height: 6,
                           decoration: BoxDecoration(
-                            color: Colors.lightBlue,
+                            color: Colors.blue,
                             shape: BoxShape.circle,
                           ),
                         ),
                       if (c)
                         Container(
-                          margin: EdgeInsets.symmetric(horizontal: 1, vertical: 2),
+                          margin:
+                          EdgeInsets.symmetric(horizontal: 1, vertical: 2),
                           width: 6,
                           height: 6,
                           decoration: BoxDecoration(
@@ -114,7 +110,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
         ),
       );
     }
-
     return cells;
   }
 
@@ -128,7 +123,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
   @override
   Widget build(BuildContext context) {
     final monthLabel = DateFormat('MMMM yyyy').format(displayedMonth);
-
     return Scaffold(
       appBar: AppBar(
         title: SizedBox.shrink(),
@@ -143,11 +137,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   icon: Icon(Icons.chevron_left),
                   onPressed: () => _changeMonth(-1),
                 ),
-                SizedBox(width: 8),
                 Text(monthLabel,
                     style:
                     TextStyle(fontSize: 18, fontWeight: FontWeight.w500)),
-                SizedBox(width: 8),
                 IconButton(
                   icon: Icon(Icons.chevron_right),
                   onPressed: () => _changeMonth(1),

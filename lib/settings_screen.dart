@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'main.dart'; // for access to Settings, WeightUnit, CardioUnit
+import 'main.dart'; // for Settings, WeightUnit, CardioUnit
 
 class SettingsScreen extends StatelessWidget {
   final Settings settings;
