@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
 import 'settings_screen.dart';
+import 'calendar_screen.dart';
 
 void main() {
   runApp(GymTrackerApp());
 }
-
-// === SETTINGS CONTROLLER ===
 
 enum WeightUnit { metric, imperial }
 enum CardioUnit { km, miles, feet }
@@ -32,9 +32,6 @@ class Settings extends ChangeNotifier {
   }
 }
 
-
-// === MAIN APP ===
-
 class GymTrackerApp extends StatefulWidget {
   @override
   State<GymTrackerApp> createState() => _GymTrackerAppState();
@@ -47,24 +44,20 @@ class _GymTrackerAppState extends State<GymTrackerApp> {
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: settings,
-      builder: (context, _) {
-        return MaterialApp(
-          title: 'Gym Tracker',
-          themeMode: settings.themeMode,
-          theme: ThemeData.light(),
-          darkTheme: ThemeData.dark(),
-          home: MainScreen(settings: settings),
-        );
-      },
+      builder: (_, __) => MaterialApp(
+        title: 'Gym Tracker',
+        themeMode: settings.themeMode,
+        theme: ThemeData.light(),
+        darkTheme: ThemeData.dark(),
+        home: MainScreen(settings: settings),
+      ),
     );
   }
 }
 
-// === MAIN SCREEN ===
-
 class MainScreen extends StatefulWidget {
   final Settings settings;
-  const MainScreen({super.key, required this.settings});
+  const MainScreen({Key? key, required this.settings}) : super(key: key);
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -81,14 +74,14 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
-  String _dateKey(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
+  String _dateKey(DateTime date) =>
+      DateFormat('yyyy-MM-dd').format(date);
 
   String _getFriendlyDateLabel(DateTime date) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final target = DateTime(date.year, date.month, date.day);
     final diff = target.difference(today).inDays;
-
     if (diff == 0) return "Today";
     if (diff == -1) return "Yesterday";
     if (diff == 1) return "Tomorrow";
@@ -118,8 +111,7 @@ class _MainScreenState extends State<MainScreen> {
     final weightUnit = widget.settings.weightUnit;
     final cardioUnit = widget.settings.cardioUnit;
 
-
-    return await showDialog<String>(
+    return showDialog<String>(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
@@ -133,9 +125,11 @@ class _MainScreenState extends State<MainScreen> {
                   hint: Text("Select type"),
                   isExpanded: true,
                   items: ["Weightlifting", "Cardio"]
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .map((e) =>
+                      DropdownMenuItem(value: e, child: Text(e)))
                       .toList(),
-                  onChanged: (val) => setState(() => selectedType = val),
+                  onChanged: (val) =>
+                      setState(() => selectedType = val),
                 ),
                 SizedBox(height: 10),
                 Autocomplete<String>(
@@ -143,22 +137,23 @@ class _MainScreenState extends State<MainScreen> {
                     if (textEditingValue.text == '') {
                       return const Iterable<String>.empty();
                     }
-                    return previousExerciseNames.where((String option) {
-                      return option
-                          .toLowerCase()
-                          .contains(textEditingValue.text.toLowerCase());
-                    });
+                    return previousExerciseNames.where((option) =>
+                        option.toLowerCase().contains(
+                            textEditingValue.text.toLowerCase()));
                   },
-                  fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                  fieldViewBuilder:
+                      (context, controller, focusNode, onSubmitted) {
                     controller.text = nameController.text;
                     return TextField(
                       controller: controller,
                       focusNode: focusNode,
-                      decoration: InputDecoration(labelText: "Exercise Name"),
-                      onChanged: (val) => nameController.text = val,
+                      decoration:
+                      InputDecoration(labelText: "Exercise Name"),
+                      onChanged: (val) =>
+                      nameController.text = val,
                     );
                   },
-                  onSelected: (String selection) {
+                  onSelected: (selection) {
                     nameController.text = selection;
                   },
                 ),
@@ -167,8 +162,8 @@ class _MainScreenState extends State<MainScreen> {
                     controller: weightController,
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
-                      labelText: "Weight (${weightUnit == WeightUnit.metric ? "kg" : "lbs"})",
-
+                      labelText:
+                      "Weight (${weightUnit == WeightUnit.metric ? "kg" : "lbs"})",
                     ),
                   ),
                   TextField(
@@ -182,46 +177,44 @@ class _MainScreenState extends State<MainScreen> {
                     controller: distanceController,
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
-                      labelText: "Distance (${cardioUnit == CardioUnit.km ? "km" : cardioUnit == CardioUnit.miles ? "miles" : "feet"})",
-
+                      labelText:
+                      "Distance (${cardioUnit == CardioUnit.km ? "km" : cardioUnit == CardioUnit.miles ? "miles" : "feet"})",
                     ),
                   ),
                   TextField(
                     controller: timeController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(labelText: "Time (min)"),
+                    decoration:
+                    InputDecoration(labelText: "Time (e.g. 30 min)"),
                   ),
-                ]
+                ],
               ],
             ),
           ),
           actions: [
             TextButton(
               onPressed: () {
-                if (selectedType == null || nameController.text.trim().isEmpty) {
+                if (selectedType == null ||
+                    nameController.text.trim().isEmpty) {
                   Navigator.pop(context, null);
                   return;
                 }
-
                 final name = nameController.text.trim();
                 String summary = "";
-
                 if (selectedType == "Weightlifting") {
                   final weight = weightController.text;
                   final sets = setsController.text;
-                  summary = "$name - ${weight}${weightUnit == WeightUnit.metric ? "kg" : "lbs"} x ${sets} sets";
-
+                  summary =
+                  "$name - ${weight}${weightUnit == WeightUnit.metric ? "kg" : "lbs"} x ${sets} sets";
                 } else {
                   final dist = distanceController.text;
                   final time = timeController.text;
-                  String cardioUnitLabel = cardioUnit == CardioUnit.km
+                  final unitLabel = cardioUnit == CardioUnit.km
                       ? "km"
                       : cardioUnit == CardioUnit.miles
-                      ? "mi"
+                      ? "miles"
                       : "ft";
-                  summary = "$name - ${dist}$cardioUnitLabel in ${time}min";
+                  summary = "$name - ${dist}$unitLabel in $time";
                 }
-
                 Navigator.pop(context, summary);
               },
               child: Text("Add"),
@@ -239,8 +232,26 @@ class _MainScreenState extends State<MainScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: Row(
           children: [
+            IconButton(
+              icon: Icon(Icons.calendar_today),
+              onPressed: () async {
+                final picked = await Navigator.push<DateTime?>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CalendarScreen(
+                        exercisesPerDay: exercisesPerDay),
+                  ),
+                );
+                if (picked != null) {
+                  setState(() {
+                    selectedDate = picked;
+                  });
+                }
+              },
+            ),
             Spacer(),
             IconButton(
               icon: Icon(Icons.settings),
@@ -248,20 +259,19 @@ class _MainScreenState extends State<MainScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => SettingsScreen(settings: widget.settings),
+                    builder: (_) =>
+                        SettingsScreen(settings: widget.settings),
                   ),
                 );
               },
             ),
           ],
         ),
-        automaticallyImplyLeading: false,
-        toolbarHeight: 50,
       ),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: EdgeInsets.symmetric(vertical: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -284,12 +294,32 @@ class _MainScreenState extends State<MainScreen> {
           Expanded(
             child: exercises.isEmpty
                 ? Center(child: Text("No exercises yet. Tap + to add."))
-                : ListView.builder(
-              itemCount: exercises.length,
-              itemBuilder: (_, index) => ListTile(
-                leading: Icon(Icons.fitness_center),
-                title: Text(exercises[index]),
-              ),
+                : ReorderableListView(
+              onReorder: (oldIndex, newIndex) {
+                setState(() {
+                  if (newIndex > oldIndex) newIndex--;
+                  final item = exercises.removeAt(oldIndex);
+                  exercises.insert(newIndex, item);
+                });
+              },
+              children: [
+                for (var i = 0; i < exercises.length; i++)
+                  ListTile(
+                    key: ValueKey('$key-$i-${exercises[i]}'),
+                    leading: exercises[i].toLowerCase().contains(' in ')
+                        ? Icon(Icons.directions_run)
+                        : Icon(Icons.fitness_center),
+                    title: Text(exercises[i]),
+                    trailing: IconButton(
+                      icon: Icon(Icons.delete),
+                      onPressed: () {
+                        setState(() {
+                          exercises.removeAt(i);
+                        });
+                      },
+                    ),
+                  ),
+              ],
             ),
           ),
         ],
