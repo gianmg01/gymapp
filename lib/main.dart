@@ -1,16 +1,33 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart';  // For date formatting
 
 import 'settings_screen.dart';
 import 'calendar_screen.dart';
 
-void main() {
-  runApp(GymTrackerApp());
-}
-
+// Enums for unit preferences
 enum WeightUnit { metric, imperial }
 enum CardioUnit { km, miles, feet }
 
+typedef ExerciseItem = dynamic; // Can be ExerciseLeaf or Superset
+
+// Represents a single exercise entry with summary text
+class ExerciseLeaf {
+  String summary; // E.g., "Squats - 100kg x 4 sets"
+  ExerciseLeaf(this.summary);
+}
+
+// Represents a superset grouping multiple exercises
+class Superset {
+  String name;               // Superset title
+  int sets;                  // Total sets for the superset
+  List<ExerciseLeaf> children; // Exercises in this superset
+  Superset({required this.name, required this.children, this.sets = 1});
+}
+
+void main() => runApp(GymTrackerApp()); // Entry point
+
+// Settings controller for theme and unit preferences
 class Settings extends ChangeNotifier {
   ThemeMode themeMode = ThemeMode.light;
   WeightUnit weightUnit = WeightUnit.metric;
@@ -21,25 +38,25 @@ class Settings extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setWeightUnit(WeightUnit unit) {
-    weightUnit = unit;
+  void setWeightUnit(WeightUnit u) {
+    weightUnit = u;
     notifyListeners();
   }
 
-  void setCardioUnit(CardioUnit unit) {
-    cardioUnit = unit;
+  void setCardioUnit(CardioUnit u) {
+    cardioUnit = u;
     notifyListeners();
   }
 }
 
+// Root widget that rebuilds on settings changes
 class GymTrackerApp extends StatefulWidget {
   @override
-  State<GymTrackerApp> createState() => _GymTrackerAppState();
+  _GymTrackerAppState createState() => _GymTrackerAppState();
 }
 
 class _GymTrackerAppState extends State<GymTrackerApp> {
   final settings = Settings();
-
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -55,169 +72,162 @@ class _GymTrackerAppState extends State<GymTrackerApp> {
   }
 }
 
+// Main screen showing exercises for a selected date
 class MainScreen extends StatefulWidget {
   final Settings settings;
   const MainScreen({Key? key, required this.settings}) : super(key: key);
-
   @override
-  State<MainScreen> createState() => _MainScreenState();
+  _MainScreenState createState() => _MainScreenState();
 }
 
 class _MainScreenState extends State<MainScreen> {
   DateTime selectedDate = DateTime.now();
-  final Map<String, List<String>> exercisesPerDay = {};
-  final Set<String> previousExerciseNames = {};
+  final Map<String, List<ExerciseItem>> exercisesPerDay = {};
+  final Set<String> previousNames = {};
+  int supersetCounter = 1;
 
-  void _changeDay(int offset) {
-    setState(() {
-      selectedDate = selectedDate.add(Duration(days: offset));
-    });
-  }
+  // Helper: format date to 'yyyy-MM-dd'
+  String _dateKey(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
 
-  String _dateKey(DateTime date) =>
-      DateFormat('yyyy-MM-dd').format(date);
-
-  String _getFriendlyDateLabel(DateTime date) {
+  // Friendly label for date navigation
+  String _friendly(DateTime d) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final target = DateTime(date.year, date.month, date.day);
+    final target = DateTime(d.year, d.month, d.day);
     final diff = target.difference(today).inDays;
-    if (diff == 0) return "Today";
-    if (diff == -1) return "Yesterday";
-    if (diff == 1) return "Tomorrow";
-    return DateFormat('MMM d').format(date);
+    if (diff == -1) return 'Yesterday';
+    if (diff == 0) return 'Today';
+    if (diff == 1) return 'Tomorrow';
+    return DateFormat('MMM d').format(d);
   }
 
-  void _addExercise() async {
-    final summary = await _showAddExerciseDialog(context);
-    if (summary != null && summary.isNotEmpty) {
-      final key = _dateKey(selectedDate);
-      final name = summary.split(" - ").first;
-      setState(() {
-        exercisesPerDay.putIfAbsent(key, () => []).add(summary);
-        previousExerciseNames.add(name);
-      });
+  // Change selected day by offset
+  void _changeDay(int off) => setState(() => selectedDate = selectedDate.add(Duration(days: off)));
+
+  // Show dialog to add a new exercise, returns summary string
+  Future<String?> _showAdd({ExerciseLeaf? existing, int? currentSets, bool isSuperset = false}) async {
+    String? type;
+    final nameCtrl = TextEditingController(text: existing?.summary.split(' - ').first ?? '');
+    final weightCtrl = TextEditingController();
+    final setsCtrl = TextEditingController(text: currentSets?.toString() ?? '');
+    final distCtrl = TextEditingController();
+    final timeCtrl = TextEditingController();
+    final wU = widget.settings.weightUnit;
+    final cU = widget.settings.cardioUnit;
+
+    // Pre-populate based on existing summary
+    if (existing != null) {
+      final parts = existing.summary.split(' - ');
+      if (parts.length == 2) {
+        nameCtrl.text = parts[0];
+        final rest = parts[1];
+        if (rest.contains('sets')) {
+          type = 'Weightlifting';
+          final match = RegExp(r'(\d+)(kg|lbs) x (\d+) sets').firstMatch(rest);
+          if (match != null) {
+            weightCtrl.text = match.group(1)!;
+            setsCtrl.text = match.group(3)!;
+          }
+        } else if (rest.contains('in')) {
+          type = 'Cardio';
+          final match = RegExp(r'(\d+)(km|miles|feet) in (.+)').firstMatch(rest);
+          if (match != null) {
+            distCtrl.text = match.group(1)!;
+            timeCtrl.text = match.group(3)!;
+          }
+        }
+      }
     }
-  }
-
-  Future<String?> _showAddExerciseDialog(BuildContext context) async {
-    String? selectedType;
-    final nameController = TextEditingController();
-    final weightController = TextEditingController();
-    final setsController = TextEditingController();
-    final distanceController = TextEditingController();
-    final timeController = TextEditingController();
-
-    final weightUnit = widget.settings.weightUnit;
-    final cardioUnit = widget.settings.cardioUnit;
 
     return showDialog<String>(
       context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text("Add Exercise"),
+      builder: (ctx) => StatefulBuilder(
+        builder: (cst, setSt) => AlertDialog(
+          title: Text(existing != null ? 'Edit Exercise' : 'Add Exercise'),
           content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButton<String>(
-                  value: selectedType,
-                  hint: Text("Select type"),
-                  isExpanded: true,
-                  items: ["Weightlifting", "Cardio"]
-                      .map((e) =>
-                      DropdownMenuItem(value: e, child: Text(e)))
-                      .toList(),
-                  onChanged: (val) =>
-                      setState(() => selectedType = val),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // Select type
+              DropdownButton<String>(
+                value: type,
+                hint: Text('Type'),
+                isExpanded: true,
+                items: ['Weightlifting', 'Cardio']
+                    .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                    .toList(),
+                onChanged: (v) => setSt(() => type = v),
+              ),
+              SizedBox(height: 8),
+              // Name autocomplete
+              Autocomplete<String>(
+                optionsBuilder: (te) {
+                  if (te.text.isEmpty) return const [];
+                  return previousNames.where((o) =>
+                      o.toLowerCase().contains(te.text.toLowerCase()));
+                },
+                fieldViewBuilder: (c, ctrl, fn, fs) {
+                  ctrl.text = nameCtrl.text;
+                  return TextField(
+                    controller: ctrl,
+                    focusNode: fn,
+                    decoration: InputDecoration(labelText: 'Name'),
+                    onChanged: (v) => nameCtrl.text = v,
+                  );
+                },
+                onSelected: (sel) => nameCtrl.text = sel,
+              ),
+              // Weightlifting inputs
+              if (type == 'Weightlifting') ...[
+                TextField(
+                  controller: weightCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Weight (${wU == WeightUnit.metric ? 'kg' : 'lbs'})',
+                  ),
                 ),
-                SizedBox(height: 10),
-                Autocomplete<String>(
-                  optionsBuilder: (TextEditingValue textEditingValue) {
-                    if (textEditingValue.text == '') {
-                      return const Iterable<String>.empty();
-                    }
-                    return previousExerciseNames.where((option) =>
-                        option.toLowerCase().contains(
-                            textEditingValue.text.toLowerCase()));
-                  },
-                  fieldViewBuilder:
-                      (context, controller, focusNode, onSubmitted) {
-                    controller.text = nameController.text;
-                    return TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      decoration:
-                      InputDecoration(labelText: "Exercise Name"),
-                      onChanged: (val) =>
-                      nameController.text = val,
-                    );
-                  },
-                  onSelected: (selection) {
-                    nameController.text = selection;
-                  },
+                TextField(
+                  controller: setsCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(labelText: 'Sets'),
                 ),
-                if (selectedType == "Weightlifting") ...[
-                  TextField(
-                    controller: weightController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText:
-                      "Weight (${weightUnit == WeightUnit.metric ? "kg" : "lbs"})",
-                    ),
-                  ),
-                  TextField(
-                    controller: setsController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(labelText: "Sets"),
-                  ),
-                ],
-                if (selectedType == "Cardio") ...[
-                  TextField(
-                    controller: distanceController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText:
-                      "Distance (${cardioUnit == CardioUnit.km ? "km" : cardioUnit == CardioUnit.miles ? "miles" : "feet"})",
-                    ),
-                  ),
-                  TextField(
-                    controller: timeController,
-                    decoration:
-                    InputDecoration(labelText: "Time (e.g. 30 min)"),
-                  ),
-                ],
               ],
-            ),
+              // Cardio inputs
+              if (type == 'Cardio') ...[
+                TextField(
+                  controller: distCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Distance (${cU == CardioUnit.km ? 'km' : cU == CardioUnit.miles ? 'miles' : 'feet'})',
+                  ),
+                ),
+                TextField(
+                  controller: timeCtrl,
+                  decoration: InputDecoration(labelText: 'Time (e.g. 30 min)'),
+                ),
+              ],
+            ]),
           ),
           actions: [
             TextButton(
               onPressed: () {
-                if (selectedType == null ||
-                    nameController.text.trim().isEmpty) {
-                  Navigator.pop(context, null);
+                if (type == null || nameCtrl.text.trim().isEmpty) {
+                  Navigator.pop(ctx, null);
                   return;
                 }
-                final name = nameController.text.trim();
-                String summary = "";
-                if (selectedType == "Weightlifting") {
-                  final weight = weightController.text;
-                  final sets = setsController.text;
-                  summary =
-                  "$name - ${weight}${weightUnit == WeightUnit.metric ? "kg" : "lbs"} x ${sets} sets";
+                final name = nameCtrl.text.trim();
+                String sum;
+                if (type == 'Weightlifting') {
+                  sum = '$name - ${weightCtrl.text}${wU == WeightUnit.metric ? 'kg' : 'lbs'} x ${setsCtrl.text} sets';
                 } else {
-                  final dist = distanceController.text;
-                  final time = timeController.text;
-                  final unitLabel = cardioUnit == CardioUnit.km
-                      ? "km"
-                      : cardioUnit == CardioUnit.miles
-                      ? "miles"
-                      : "ft";
-                  summary = "$name - ${dist}$unitLabel in $time";
+                  final unit = cU == CardioUnit.km
+                      ? 'km'
+                      : cU == CardioUnit.miles
+                      ? 'miles'
+                      : 'feet';
+                  sum = '$name - ${distCtrl.text}$unit in ${timeCtrl.text}';
                 }
-                Navigator.pop(context, summary);
+                Navigator.pop(ctx, sum);
               },
-              child: Text("Add"),
+              child: Text(existing != null ? 'Save' : 'Add'),
             ),
           ],
         ),
@@ -225,10 +235,202 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // Add exercise to the list
+  void _add() async {
+    final sum = await _showAdd();
+    if (sum != null && sum.isNotEmpty) {
+      final k = _dateKey(selectedDate);
+      setState(() {
+        exercisesPerDay.putIfAbsent(k, () => []);
+        exercisesPerDay[k]!.add(ExerciseLeaf(sum));
+        previousNames.add(sum.split(' - ').first);
+      });
+    }
+  }
+
+  // Edit an existing leaf item
+  void _editLeaf(ExerciseLeaf item, int idx, List<ExerciseItem> list) async {
+    final newSum = await _showAdd(existing: item);
+    if (newSum != null && newSum.isNotEmpty) {
+      setState(() {
+        list[idx] = ExerciseLeaf(newSum);
+        previousNames.add(newSum.split(' - ').first);
+      });
+    }
+  }
+
+  // Build each item: either a single exercise or a superset
+  Widget _buildItem(ExerciseItem item, int idx, List<ExerciseItem> list) {
+    // Single exercise: draggable and deletable/editable
+    if (item is ExerciseLeaf) {
+      return LongPressDraggable<ExerciseLeaf>(
+        key: ValueKey(item.summary + idx.toString()),
+        data: item,
+        feedback: Material(
+          child: Container(
+            padding: EdgeInsets.all(8),
+            color: Colors.grey.shade200,
+            child: Text(item.summary),
+          ),
+        ),
+        child: DragTarget<ExerciseLeaf>(
+          onWillAccept: (d) => d != item,
+          onAccept: (d) {
+            // Combine into a superset on drop
+            setState(() {
+              list.remove(d);
+              list.remove(item);
+              final sup = Superset(
+                name: 'Superset ${supersetCounter}',
+                children: [d, item],
+              );
+              supersetCounter++;
+              list.insert(idx, sup);
+            });
+          },
+          builder: (context, candidate, reject) => ListTile(
+            leading: item.summary.toLowerCase().contains(' in ')
+                ? Icon(Icons.directions_run)
+                : Icon(Icons.fitness_center),
+            title: Text(item.summary),
+            trailing: PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert),
+              onSelected: (val) {
+                if (val == 'edit') {
+                  _editLeaf(item, idx, list);
+                } else if (val == 'delete') {
+                  setState(() => list.removeAt(idx));
+                }
+              },
+              itemBuilder: (ctx) => [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(children: [Icon(Icons.edit, color: Colors.white), SizedBox(width: 8), Text('Edit')]),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Row(children: [Icon(Icons.delete, color: Colors.red), SizedBox(width: 8), Text('Delete')]),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Superset: box with indented exercises, edit button, and editable sets count
+    if (item is Superset) {
+      final setsCtrl = TextEditingController(text: item.sets.toString());
+      return Container(
+        key: ValueKey(item.name + idx.toString()),
+        margin: EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+        padding: EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header: name and edit button
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  item.name,
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: Icon(Icons.edit),
+                  onPressed: () {
+                    // Rename superset dialog
+                    showDialog(
+                      context: context,
+                      builder: (c) {
+                        final ctrl = TextEditingController(text: item.name);
+                        return AlertDialog(
+                          title: Text('Rename Superset'),
+                          content: TextField(controller: ctrl),
+                          actions: [
+                            TextButton(
+                              onPressed: () {
+                                setState(() => item.name = ctrl.text);
+                                Navigator.pop(c);
+                              },
+                              child: Text('OK'),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+              ],
+            ),
+            // Indented exercise list
+            Padding(
+              padding: EdgeInsets.only(left: 16),
+              child: Column(
+                children: item.children.map((ch) {
+                  return ListTile(
+                    leading: ch.summary.toLowerCase().contains(' in ')
+                        ? Icon(Icons.directions_run)
+                        : Icon(Icons.fitness_center),
+                    title: Text(
+                      ch.summary.replaceAll(RegExp(r' x \d+ sets'), ''),
+                    ),
+                    trailing: IconButton(
+                      icon: Icon(Icons.delete),
+                      onPressed: () => setState(() {
+                        item.children.remove(ch);
+                        if (item.children.isEmpty) list.remove(item);
+                      }),
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                  );
+                }).toList(),
+              ),
+            ),
+            SizedBox(height: 8),
+            // Editable sets count
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('Number of sets:'),
+                SizedBox(width: 8),
+                Container(
+                  width: 50,
+                  child: TextField(
+                    controller: setsCtrl,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    onSubmitted: (v) {
+                      setState(() { item.sets = int.tryParse(v) ?? item.sets; });
+                    },
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Fallback
+    return Container(key: ValueKey(idx));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final key = _dateKey(selectedDate);
-    final exercises = exercisesPerDay[key] ?? [];
+    final k = _dateKey(selectedDate);
+    exercisesPerDay.putIfAbsent(k, () => []);
+    final list = exercisesPerDay[k]!;
 
     return Scaffold(
       appBar: AppBar(
@@ -238,38 +440,37 @@ class _MainScreenState extends State<MainScreen> {
             IconButton(
               icon: Icon(Icons.calendar_today),
               onPressed: () async {
-                final picked = await Navigator.push<DateTime?>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => CalendarScreen(
-                        exercisesPerDay: exercisesPerDay),
-                  ),
+                final pick = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => CalendarScreen(exercisesPerDay: exercisesPerDay
+                          .map((key, items) => MapEntry(
+                          key,
+                          items.whereType<ExerciseLeaf>().map((e) => e.summary).toList())),
+                      ),
+                    )
                 );
-                if (picked != null) {
-                  setState(() {
-                    selectedDate = picked;
-                  });
+                if (pick != null && pick is DateTime) {
+                  setState(() => selectedDate = pick);
                 }
               },
             ),
             Spacer(),
             IconButton(
               icon: Icon(Icons.settings),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        SettingsScreen(settings: widget.settings),
-                  ),
-                );
-              },
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SettingsScreen(settings: widget.settings),
+                ),
+              ),
             ),
           ],
         ),
       ),
       body: Column(
         children: [
+          // Date navigation
           Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Row(
@@ -280,7 +481,7 @@ class _MainScreenState extends State<MainScreen> {
                   onPressed: () => _changeDay(-1),
                 ),
                 Text(
-                  _getFriendlyDateLabel(selectedDate),
+                  _friendly(selectedDate),
                   style: TextStyle(fontSize: 18),
                 ),
                 IconButton(
@@ -291,43 +492,28 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           Divider(),
+          // Reorderable list
           Expanded(
-            child: exercises.isEmpty
-                ? Center(child: Text("No exercises yet. Tap + to add."))
-                : ReorderableListView(
+            child: ReorderableListView(
               onReorder: (oldIndex, newIndex) {
                 setState(() {
                   if (newIndex > oldIndex) newIndex--;
-                  final item = exercises.removeAt(oldIndex);
-                  exercises.insert(newIndex, item);
+                  final item = list.removeAt(oldIndex);
+                  list.insert(newIndex, item);
                 });
               },
               children: [
-                for (var i = 0; i < exercises.length; i++)
-                  ListTile(
-                    key: ValueKey('$key-$i-${exercises[i]}'),
-                    leading: exercises[i].toLowerCase().contains(' in ')
-                        ? Icon(Icons.directions_run)
-                        : Icon(Icons.fitness_center),
-                    title: Text(exercises[i]),
-                    trailing: IconButton(
-                      icon: Icon(Icons.delete),
-                      onPressed: () {
-                        setState(() {
-                          exercises.removeAt(i);
-                        });
-                      },
-                    ),
-                  ),
+                for (int i = 0; i < list.length; i++)
+                  _buildItem(list[i], i, list),
               ],
             ),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _addExercise,
+        onPressed: _add,
         child: Icon(Icons.add),
-        tooltip: "Add Exercise",
+        tooltip: 'Add Exercise',
       ),
     );
   }
