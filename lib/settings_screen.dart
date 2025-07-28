@@ -7,18 +7,42 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Section headers use a larger, bold style
+    final sectionStyle = Theme.of(context)
+        .textTheme
+        .headline6
+        ?.copyWith(fontWeight: FontWeight.bold);
+    // Setting labels slightly smaller but still bold
+    final labelStyle = Theme.of(context)
+        .textTheme
+        .subtitle1
+        ?.copyWith(fontWeight: FontWeight.w600);
+
     return Scaffold(
       appBar: AppBar(title: Text("Settings")),
       body: ListView(
         padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         children: [
+          // -- Section: Display --
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text("Display", style: sectionStyle),
+          ),
+          Divider(thickness: 2),
+
+          // Dark Mode
           SwitchListTile(
-            title: Text("Dark Mode"),
+            title: Text("Dark Mode", style: labelStyle),
             value: settings.themeMode == ThemeMode.dark,
             onChanged: (val) => settings.toggleTheme(val),
           ),
-          SizedBox(height: 16),
-          Text("Weightlifting Units"),
+          Divider(),
+
+          // Weightlifting Units
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text("Weightlifting Units", style: labelStyle),
+          ),
           DropdownButton<WeightUnit>(
             value: settings.weightUnit,
             onChanged: (val) {
@@ -36,8 +60,13 @@ class SettingsScreen extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: 16),
-          Text("Cardio Units"),
+          Divider(),
+
+          // Cardio Units
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text("Cardio Units", style: labelStyle),
+          ),
           DropdownButton<CardioUnit>(
             value: settings.cardioUnit,
             onChanged: (val) {
@@ -59,6 +88,7 @@ class SettingsScreen extends StatelessWidget {
               ),
             ],
           ),
+          Divider(),
         ],
       ),
     );

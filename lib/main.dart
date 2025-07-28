@@ -20,7 +20,8 @@ abstract class ExerciseNode {
 class ExerciseLeaf extends ExerciseNode {
   String summary;
   String? note;
-  ExerciseLeaf(this.summary, {this.note}) : super(DateTime.now().toIso8601String());
+  ExerciseLeaf(this.summary, {this.note})
+      : super(DateTime.now().toIso8601String());
 }
 
 class Superset extends ExerciseNode {
@@ -104,9 +105,9 @@ class _MainScreenState extends State<MainScreen> {
 
   String _friendly(DateTime d) {
     final now = DateTime.now();
-    final t0 = DateTime(now.year, now.month, now.day);
-    final t1 = DateTime(d.year, d.month, d.day);
-    final diff = t1.difference(t0).inDays;
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(d.year, d.month, d.day);
+    final diff = target.difference(today).inDays;
     if (diff == -1) return 'Yesterday';
     if (diff == 0) return 'Today';
     if (diff == 1) return 'Tomorrow';
@@ -130,7 +131,9 @@ class _MainScreenState extends State<MainScreen> {
         final nodes = <ExerciseNode>[];
         for (var item in list) {
           if (item['type'] == 'leaf') {
-            nodes.add(ExerciseLeaf(item['summary'], note: item['note']));
+            final leaf = ExerciseLeaf(item['summary']);
+            leaf.note = (item['note'] as String).isNotEmpty ? item['note'] : null;
+            nodes.add(leaf);
           } else {
             final children = <ExerciseLeaf>[];
             for (var s in item['children']) {
@@ -229,7 +232,7 @@ class _MainScreenState extends State<MainScreen> {
     final note = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text('Edit Note'),
+        title: Text('Add Note'),
         content: TextField(
           controller: ctrl,
           decoration: InputDecoration(labelText: 'Note'),
@@ -243,7 +246,7 @@ class _MainScreenState extends State<MainScreen> {
       ),
     );
     if (note != null) {
-      setState(() => leaf.note = note);
+      setState(() => leaf.note = note.isNotEmpty ? note : null);
       _saveExercises();
     }
   }
@@ -481,8 +484,7 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  Widget _buildGap(int idx,
-      {Superset? sup, int? childIndex}) {
+  Widget _buildGap(int idx, {Superset? sup, int? childIndex}) {
     return DragTarget<ExerciseNode>(
       onWillAccept: (_) => true,
       onAccept: (node) {
@@ -492,13 +494,11 @@ class _MainScreenState extends State<MainScreen> {
             if (inSup) {
               sup.children.remove(node);
               sup.children.insert(
-                  childIndex!.clamp(0, sup.children.length),
-                  node);
+                  childIndex!.clamp(0, sup.children.length), node);
             } else {
               _removeNode(node);
               sup.children.insert(
-                  childIndex!.clamp(0, sup.children.length),
-                  node);
+                  childIndex!.clamp(0, sup.children.length), node);
             }
           } else {
             _removeNode(node);
@@ -515,8 +515,7 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildDraggable(ExerciseNode node,
-      {bool insideSup = false}) {
+  Widget _buildDraggable(ExerciseNode node, {bool insideSup = false}) {
     return LongPressDraggable<ExerciseNode>(
       data: node,
       feedback: ConstrainedBox(
@@ -530,10 +529,9 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildNodeTile(ExerciseNode node,
-      {bool insideSup = false}) {
+  Widget _buildNodeTile(ExerciseNode node, {bool insideSup = false}) {
     if (node is Superset) {
-      final i = items.indexOf(node);
+      final idx0 = items.indexOf(node);
       return Container(
         margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
         padding: EdgeInsets.all(8),
@@ -557,8 +555,8 @@ class _MainScreenState extends State<MainScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(node.name,
-                      style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
                   PopupMenuButton<String>(
                     onSelected: (v) {
                       if (v == 'edit') _editNode(node);
@@ -585,11 +583,9 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
             for (int j = 0; j <= node.children.length; j++) ...[
-              _buildGap(i + 1 + j,
-                  sup: node, childIndex: j),
+              _buildGap(idx0 + 1 + j, sup: node, childIndex: j),
               if (j < node.children.length)
-                _buildDraggable(node.children[j],
-                    insideSup: true),
+                _buildDraggable(node.children[j], insideSup: true),
             ],
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -611,8 +607,8 @@ class _MainScreenState extends State<MainScreen> {
                     },
                     decoration: InputDecoration(
                       isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                          vertical: 4, horizontal: 4),
+                      contentPadding:
+                      EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -628,105 +624,102 @@ class _MainScreenState extends State<MainScreen> {
       final header = parts.first;
       final rest = parts.length > 1 ? parts.sublist(1) : null;
 
-      Widget content;
-      if (rest != null) {
-        content = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(header),
-            for (var line in rest)
-              Padding(
-                padding: EdgeInsets.only(left: 16),
-                child: Text(line),
-              ),
-          ],
-        );
-      } else {
-        content = Text(header);
-      }
-
       return Container(
-        margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            DragTarget<ExerciseNode>(
-              onWillAccept: (d) =>
-              d is ExerciseLeaf && d.id != leaf.id,
-              onAccept: (d) {
-                setState(() {
-                  final idx = items.indexOf(leaf);
-                  _removeNode(d);
-                  _removeNode(leaf);
-                  final sup = Superset(
-                      'Superset ${supersetCounter++}',
-                      children: [d as ExerciseLeaf, leaf]);
-                  items.insert(idx.clamp(0, items.length), sup);
-                  _saveExercises();
-                });
-              },
-              builder: (ctx, cand, rej) => Container(
+          margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+          child: DragTarget<ExerciseNode>(
+            onWillAccept: (d) => d is ExerciseLeaf && d.id != leaf.id,
+            onAccept: (d) {
+              setState(() {
+                final idx1 = items.indexOf(leaf);
+                _removeNode(d);
+                _removeNode(leaf);
+                final sup = Superset(
+                    'Superset ${supersetCounter++}',
+                    children: [d as ExerciseLeaf, leaf]);
+                items.insert(idx1.clamp(0, items.length), sup);
+                _saveExercises();
+              });
+            },
+            builder: (ctx, cand, rej) => Container(
                 padding: EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   border: Border.all(
-                      color: cand.isNotEmpty
-                          ? Colors.blueAccent
-                          : Colors.grey),
+                      color: cand.isNotEmpty ? Colors.blueAccent : Colors.grey),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Row(
-                  children: [
-                    Icon(header.toLowerCase().contains(' in ')
-                        ? Icons.directions_run
-                        : Icons.fitness_center),
-                    SizedBox(width: 12),
-                    Expanded(child: content),
-                    PopupMenuButton<String>(
-                      onSelected: (v) {
-                        if (v == 'edit') _editNode(leaf);
-                        else if (v == 'note') _editNote(leaf);
-                        else _deleteNode(leaf);
-                      },
-                      itemBuilder: (_) => [
-                        PopupMenuItem(
-                            value: 'edit',
-                            child: Row(children: [
-                              Icon(Icons.edit),
-                              SizedBox(width: 8),
-                              Text('Edit')
-                            ])),
-                        PopupMenuItem(
-                            value: 'note',
-                            child: Row(children: [
-                              Icon(Icons.note),
-                              SizedBox(width: 8),
-                              Text('Note')
-                            ])),
-                        PopupMenuItem(
-                            value: 'delete',
-                            child: Row(children: [
-                              Icon(Icons.delete, color: Colors.red),
-                              SizedBox(width: 8),
-                              Text('Delete')
-                            ])),
-                      ],
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                Row(
+                children: [
+                Icon(header.toLowerCase().contains(' in ')
+                    ? Icons.directions_run
+                    : Icons.fitness_center),
+            SizedBox(width: 12),
+            Expanded(
+              child: rest != null
+                  ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(header),
+                  for (var line in rest)
+                    Padding(
+                      padding: EdgeInsets.only(left: 16),
+                      child: Text(line),
                     ),
-                  ],
-                ),
-              ),
+                ],
+              )
+                  : Text(header),
             ),
-            if (leaf.note != null && leaf.note!.isNotEmpty)
-              Padding(
-                padding: EdgeInsets.only(left: 40, top: 4, bottom: 4),
-                child: Text(
-                  leaf.note!,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                ),
-              ),
-          ],
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'edit')
+                  _editNode(leaf);
+                else if (v == 'note')
+                  _editNote(leaf);
+                else
+                  _deleteNode(leaf);
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                    value: 'edit',
+                    child: Row(children: [
+                      Icon(Icons.edit),
+                      SizedBox(width: 8),
+                      Text('Edit')
+                    ])),
+                PopupMenuItem(
+                    value: 'note',
+                    child: Row(children: [
+                      Icon(Icons.note),
+                      SizedBox(width: 8),
+                      Text('Add Note')
+                    ])),
+                PopupMenuItem(
+                    value: 'delete',
+                    child: Row(children: [
+                      Icon(Icons.delete, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('Delete')
+                    ])),
+              ],
+            ),
+          ]),
+          if (leaf.note != null && leaf.note!.isNotEmpty)
+      Padding(
+        padding: EdgeInsets.only(top: 4, left: 40),
+        child: Text(
+          leaf.note!,
+          style:
+          TextStyle(fontSize: 12, color: Colors.grey[700]),
         ),
-      );
-    }
+      ),
+    ],
+    ),
+    ),
+    ),
+    );
+  }
   }
 
   @override
