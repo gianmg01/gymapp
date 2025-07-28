@@ -19,7 +19,8 @@ abstract class ExerciseNode {
 
 class ExerciseLeaf extends ExerciseNode {
   String summary;
-  ExerciseLeaf(this.summary) : super(DateTime.now().toIso8601String());
+  String? note;
+  ExerciseLeaf(this.summary, {this.note}) : super(DateTime.now().toIso8601String());
 }
 
 class Superset extends ExerciseNode {
@@ -91,11 +92,9 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   DateTime selectedDate = DateTime.now();
-  // Per‑day storage
   final Map<String, List<ExerciseNode>> exercisesPerDay = {};
   int supersetCounter = 1;
 
-  // Convenience getter
   List<ExerciseNode> get items {
     final key = _dateKey(selectedDate);
     return exercisesPerDay.putIfAbsent(key, () => []);
@@ -131,7 +130,7 @@ class _MainScreenState extends State<MainScreen> {
         final nodes = <ExerciseNode>[];
         for (var item in list) {
           if (item['type'] == 'leaf') {
-            nodes.add(ExerciseLeaf(item['summary']));
+            nodes.add(ExerciseLeaf(item['summary'], note: item['note']));
           } else {
             final children = <ExerciseLeaf>[];
             for (var s in item['children']) {
@@ -145,8 +144,9 @@ class _MainScreenState extends State<MainScreen> {
       }
     });
     setState(() {
-      exercisesPerDay.clear();
-      exercisesPerDay.addAll(loaded);
+      exercisesPerDay
+        ..clear()
+        ..addAll(loaded);
     });
   }
 
@@ -159,6 +159,7 @@ class _MainScreenState extends State<MainScreen> {
           return {
             'type': 'leaf',
             'summary': node.summary,
+            'note': node.note ?? '',
           };
         } else {
           final sup = node as Superset;
@@ -177,7 +178,7 @@ class _MainScreenState extends State<MainScreen> {
   void _removeNode(ExerciseNode node) {
     if (node is Superset) {
       items.remove(node);
-    } else {
+    } else if (node is ExerciseLeaf) {
       for (var n in items.toList()) {
         if (n is Superset && n.children.contains(node)) {
           n.children.remove(node);
@@ -202,7 +203,6 @@ class _MainScreenState extends State<MainScreen> {
         _saveExercises();
       }
     } else {
-      // Superset rename
       final sup = node as Superset;
       final ctrl = TextEditingController(text: sup.name);
       final renamed = await showDialog<String>(
@@ -221,6 +221,30 @@ class _MainScreenState extends State<MainScreen> {
         setState(() => sup.name = renamed);
         _saveExercises();
       }
+    }
+  }
+
+  Future<void> _editNote(ExerciseLeaf leaf) async {
+    final ctrl = TextEditingController(text: leaf.note);
+    final note = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Edit Note'),
+        content: TextField(
+          controller: ctrl,
+          decoration: InputDecoration(labelText: 'Note'),
+          maxLines: null,
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, ctrl.text),
+              child: Text('Save'))
+        ],
+      ),
+    );
+    if (note != null) {
+      setState(() => leaf.note = note);
+      _saveExercises();
     }
   }
 
@@ -509,7 +533,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildNodeTile(ExerciseNode node,
       {bool insideSup = false}) {
     if (node is Superset) {
-      final idx0 = items.indexOf(node);
+      final i = items.indexOf(node);
       return Container(
         margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
         padding: EdgeInsets.all(8),
@@ -522,17 +546,19 @@ class _MainScreenState extends State<MainScreen> {
           children: [
             DragTarget<ExerciseNode>(
               onWillAccept: (d) => d is ExerciseLeaf,
-              onAccept: (d) => setState(() {
-                _removeNode(d);
-                node.children.add(d as ExerciseLeaf);
-                _saveExercises();
-              }),
+              onAccept: (d) {
+                setState(() {
+                  _removeNode(d);
+                  node.children.add(d as ExerciseLeaf);
+                  _saveExercises();
+                });
+              },
               builder: (ctx, cand, rej) => Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(node.name,
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
+                      style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   PopupMenuButton<String>(
                     onSelected: (v) {
                       if (v == 'edit') _editNode(node);
@@ -559,7 +585,7 @@ class _MainScreenState extends State<MainScreen> {
               ),
             ),
             for (int j = 0; j <= node.children.length; j++) ...[
-              _buildGap(idx0 + 1 + j,
+              _buildGap(i + 1 + j,
                   sup: node, childIndex: j),
               if (j < node.children.length)
                 _buildDraggable(node.children[j],
@@ -577,10 +603,12 @@ class _MainScreenState extends State<MainScreen> {
                         text: node.sets.toString()),
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
-                    onSubmitted: (v) => setState(() {
-                      node.sets = int.tryParse(v) ?? node.sets;
-                      _saveExercises();
-                    }),
+                    onSubmitted: (v) {
+                      setState(() {
+                        node.sets = int.tryParse(v) ?? node.sets;
+                        _saveExercises();
+                      });
+                    },
                     decoration: InputDecoration(
                       isDense: true,
                       contentPadding: EdgeInsets.symmetric(
@@ -619,60 +647,83 @@ class _MainScreenState extends State<MainScreen> {
 
       return Container(
         margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-        child: DragTarget<ExerciseNode>(
-          onWillAccept: (d) =>
-          d is ExerciseLeaf && d.id != leaf.id,
-          onAccept: (d) => setState(() {
-            final idx1 = items.indexOf(leaf);
-            _removeNode(d);
-            _removeNode(leaf);
-            final sup = Superset(
-                'Superset ${supersetCounter++}',
-                children: [d as ExerciseLeaf, leaf]);
-            items.insert(idx1.clamp(0, items.length), sup);
-            _saveExercises();
-          }),
-          builder: (ctx, cand, rej) => Container(
-            padding: EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border.all(
-                  color: cand.isNotEmpty
-                      ? Colors.blueAccent
-                      : Colors.grey),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(header.toLowerCase().contains(' in ')
-                    ? Icons.directions_run
-                    : Icons.fitness_center),
-                SizedBox(width: 12),
-                Expanded(child: content),
-                PopupMenuButton<String>(
-                  onSelected: (v) {
-                    if (v == 'edit') _editNode(leaf);
-                    else _deleteNode(leaf);
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                        value: 'edit',
-                        child: Row(children: [
-                          Icon(Icons.edit),
-                          SizedBox(width: 8),
-                          Text('Edit')
-                        ])),
-                    PopupMenuItem(
-                        value: 'delete',
-                        child: Row(children: [
-                          Icon(Icons.delete, color: Colors.red),
-                          SizedBox(width: 8),
-                          Text('Delete')
-                        ])),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DragTarget<ExerciseNode>(
+              onWillAccept: (d) =>
+              d is ExerciseLeaf && d.id != leaf.id,
+              onAccept: (d) {
+                setState(() {
+                  final idx = items.indexOf(leaf);
+                  _removeNode(d);
+                  _removeNode(leaf);
+                  final sup = Superset(
+                      'Superset ${supersetCounter++}',
+                      children: [d as ExerciseLeaf, leaf]);
+                  items.insert(idx.clamp(0, items.length), sup);
+                  _saveExercises();
+                });
+              },
+              builder: (ctx, cand, rej) => Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                      color: cand.isNotEmpty
+                          ? Colors.blueAccent
+                          : Colors.grey),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(header.toLowerCase().contains(' in ')
+                        ? Icons.directions_run
+                        : Icons.fitness_center),
+                    SizedBox(width: 12),
+                    Expanded(child: content),
+                    PopupMenuButton<String>(
+                      onSelected: (v) {
+                        if (v == 'edit') _editNode(leaf);
+                        else if (v == 'note') _editNote(leaf);
+                        else _deleteNode(leaf);
+                      },
+                      itemBuilder: (_) => [
+                        PopupMenuItem(
+                            value: 'edit',
+                            child: Row(children: [
+                              Icon(Icons.edit),
+                              SizedBox(width: 8),
+                              Text('Edit')
+                            ])),
+                        PopupMenuItem(
+                            value: 'note',
+                            child: Row(children: [
+                              Icon(Icons.note),
+                              SizedBox(width: 8),
+                              Text('Note')
+                            ])),
+                        PopupMenuItem(
+                            value: 'delete',
+                            child: Row(children: [
+                              Icon(Icons.delete, color: Colors.red),
+                              SizedBox(width: 8),
+                              Text('Delete')
+                            ])),
+                      ],
+                    ),
                   ],
                 ),
-              ],
+              ),
             ),
-          ),
+            if (leaf.note != null && leaf.note!.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(left: 40, top: 4, bottom: 4),
+                child: Text(
+                  leaf.note!,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                ),
+              ),
+          ],
         ),
       );
     }
@@ -690,22 +741,22 @@ class _MainScreenState extends State<MainScreen> {
         children: [
           IconButton(
               icon: Icon(Icons.chevron_left),
-              onPressed: () => setState(() =>
-              selectedDate =
-                  selectedDate.subtract(Duration(days: 1)))),
+              onPressed: () => setState(() {
+                selectedDate =
+                    selectedDate.subtract(Duration(days: 1));
+              })),
           Text(_friendly(selectedDate),
               style: TextStyle(fontSize: 18)),
           IconButton(
               icon: Icon(Icons.chevron_right),
-              onPressed: () => setState(() =>
-              selectedDate =
-                  selectedDate.add(Duration(days: 1)))),
+              onPressed: () => setState(() {
+                selectedDate = selectedDate.add(Duration(days: 1));
+              })),
         ],
       ),
     ));
     rows.add(Divider());
 
-    // Build gaps + draggable items
     for (int i = 0; i <= items.length; i++) {
       rows.add(_buildGap(i));
       if (i < items.length) rows.add(_buildDraggable(items[i]));
@@ -718,7 +769,6 @@ class _MainScreenState extends State<MainScreen> {
           IconButton(
             icon: Icon(Icons.calendar_today),
             onPressed: () async {
-              // flatten leaves + sup children for the calendar
               final flatMap = exercisesPerDay.map((date, list) {
                 final allSummaries = <String>[];
                 for (var node in list) {
@@ -731,13 +781,11 @@ class _MainScreenState extends State<MainScreen> {
                 }
                 return MapEntry(date, allSummaries);
               });
-
               final pick = await Navigator.push<DateTime>(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => CalendarScreen(
-                      exercisesPerDay: flatMap),
-                ),
+                    builder: (_) => CalendarScreen(
+                        exercisesPerDay: flatMap)),
               );
               if (pick != null)
                 setState(() => selectedDate = pick);
@@ -755,8 +803,7 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ]),
       ),
-      body:
-      SingleChildScrollView(child: Column(children: rows)),
+      body: SingleChildScrollView(child: Column(children: rows)),
       floatingActionButton: FloatingActionButton(
         onPressed: _add,
         child: Icon(Icons.add),
