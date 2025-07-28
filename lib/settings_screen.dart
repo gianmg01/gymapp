@@ -8,15 +8,16 @@ class SettingsScreen extends StatelessWidget {
   final VoidCallback onDeleteAll;
 
   const SettingsScreen({
-    super.key,
+    Key? key,
     required this.settings,
     required this.onFindReplace,
     required this.onFindRemove,
     required this.onDeleteAll,
-  });
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    // Text styles pulled from the theme for consistency
     final sectionStyle = Theme.of(context)
         .textTheme
         .headline6
@@ -28,92 +29,148 @@ class SettingsScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: Text("Settings")),
-      body: ListView(
-        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        children: [
-          // Display section
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text("Display", style: sectionStyle),
-          ),
-          Divider(thickness: 2),
-          SwitchListTile(
-            title: Text("Dark Mode", style: labelStyle),
-            value: settings.themeMode == ThemeMode.dark,
-            onChanged: (val) => settings.toggleTheme(val),
-          ),
-          Divider(),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text("Weightlifting Units", style: labelStyle),
-          ),
-          DropdownButton<WeightUnit>(
-            value: settings.weightUnit,
-            onChanged: (val) {
-              if (val != null) settings.setWeightUnit(val);
-            },
-            isExpanded: true,
-            items: [
-              DropdownMenuItem(
-                value: WeightUnit.metric,
-                child: Text("Metric (kg)"),
-              ),
-              DropdownMenuItem(
-                value: WeightUnit.imperial,
-                child: Text("Imperial (lbs)"),
-              ),
-            ],
-          ),
-          Divider(),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text("Cardio Units", style: labelStyle),
-          ),
-          DropdownButton<CardioUnit>(
-            value: settings.cardioUnit,
-            onChanged: (val) {
-              if (val != null) settings.setCardioUnit(val);
-            },
-            isExpanded: true,
-            items: [
-              DropdownMenuItem(
-                value: CardioUnit.km,
-                child: Text("Metric (km)"),
-              ),
-              DropdownMenuItem(
-                value: CardioUnit.miles,
-                child: Text("Imperial (miles)"),
-              ),
-              DropdownMenuItem(
-                value: CardioUnit.feet,
-                child: Text("Imperial (feet)"),
-              ),
-            ],
-          ),
-          Divider(thickness: 2),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
 
-          // Manage Data section
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text("Manage Data", style: sectionStyle),
-          ),
-          Divider(thickness: 2),
-          ListTile(
-            title: Text("Find & Replace", style: labelStyle),
-            onTap: onFindReplace,
-          ),
-          Divider(),
-          ListTile(
-            title: Text("Find & Remove", style: labelStyle),
-            onTap: onFindRemove,
-          ),
-          Divider(),
-          ListTile(
-            title: Text("Delete All Data", style: labelStyle?.copyWith(color: Colors.red)),
-            onTap: onDeleteAll,
-          ),
-          Divider(),
-        ],
+            // ── DISPLAY SECTION ───────────────────────────────────────────
+            Card(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+              elevation: 2,
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Display", style: sectionStyle),
+                    SizedBox(height: 12),
+
+                    // Dark Mode
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: Icon(Icons.brightness_6),
+                      title: Text("Dark Mode", style: labelStyle),
+                      value: settings.themeMode == ThemeMode.dark,
+                      onChanged: settings.toggleTheme,
+                    ),
+                    Divider(),
+
+                    // Weightlifting Units
+                    Row(
+                      children: [
+                        Icon(Icons.fitness_center),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text("Weightlifting Units",
+                              style: labelStyle),
+                        ),
+                        DropdownButton<WeightUnit>(
+                          value: settings.weightUnit,
+                          onChanged: (val) {
+                            if (val != null) settings.setWeightUnit(val);
+                          },
+                          items: [
+                            DropdownMenuItem(
+                              value: WeightUnit.metric,
+                              child: Text("Metric (kg)"),
+                            ),
+                            DropdownMenuItem(
+                              value: WeightUnit.imperial,
+                              child: Text("Imperial (lbs)"),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    Divider(),
+
+                    // Cardio Units
+                    Row(
+                      children: [
+                        Icon(Icons.directions_run),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child:
+                          Text("Cardio Units", style: labelStyle),
+                        ),
+                        DropdownButton<CardioUnit>(
+                          value: settings.cardioUnit,
+                          onChanged: (val) {
+                            if (val != null) settings.setCardioUnit(val);
+                          },
+                          items: [
+                            DropdownMenuItem(
+                              value: CardioUnit.km,
+                              child: Text("Metric (km)"),
+                            ),
+                            DropdownMenuItem(
+                              value: CardioUnit.miles,
+                              child: Text("Imperial (miles)"),
+                            ),
+                            DropdownMenuItem(
+                              value: CardioUnit.feet,
+                              child: Text("Imperial (feet)"),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            SizedBox(height: 24),
+
+            // ── MANAGE DATA SECTION ───────────────────────────────────────
+            Card(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+              elevation: 2,
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Manage Data", style: sectionStyle),
+                    SizedBox(height: 12),
+
+                    // Find & Replace
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.find_replace),
+                      title: Text("Find & Replace", style: labelStyle),
+                      onTap: onFindReplace,
+                    ),
+                    Divider(),
+
+                    // Find & Remove
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.remove_circle_outline),
+                      title: Text("Find & Remove", style: labelStyle),
+                      onTap: onFindRemove,
+                    ),
+                    Divider(),
+
+                    // Delete All Data
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_forever,
+                          color: Theme.of(context).errorColor),
+                      title: Text("Delete All Data",
+                          style: labelStyle
+                              ?.copyWith(color: Theme.of(context).errorColor)),
+                      onTap: onDeleteAll,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

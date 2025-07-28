@@ -567,21 +567,20 @@ class _MainScreenState extends State<MainScreen> {
 
 
   Future<void> _handleFindRemove() async {
-    // 1) gather unique base names
     final names = <String>{};
     exercisesPerDay.values.forEach((list) {
       for (var node in list) {
         if (node is ExerciseLeaf) {
-          names.add(_extractName(node.summary));
-        } else {
-          (node as Superset).children.forEach((leaf) {
-            names.add(_extractName(leaf.summary));
+          names.add(node.summary.split(' - ').first);
+        } else if (node is Superset) {
+          node.children.forEach((leaf) {
+            names.add(leaf.summary.split(' - ').first);
           });
         }
       }
     });
-
     String? selected;
+
     await showDialog(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -600,20 +599,22 @@ class _MainScreenState extends State<MainScreen> {
             TextButton(
               onPressed: () {
                 if (selected != null) {
-                  final oldName = selected!;
+                  final old = selected!;
                   setState(() {
-                    // remove standalone leaves
+                    // remove standalone
                     exercisesPerDay.values.forEach((list) {
                       list.removeWhere((node) =>
                       node is ExerciseLeaf &&
-                          _extractName(node.summary) == oldName);
+                          node.summary.split(' - ').first == old);
                     });
-                    // remove inside supersets + drop empty supersets
+                    // remove inside supersets
                     exercisesPerDay.values.forEach((list) {
-                      for (var sup in list.whereType<Superset>().toList()) {
-                        sup.children.removeWhere((leaf) =>
-                        _extractName(leaf.summary) == oldName);
-                        if (sup.children.isEmpty) list.remove(sup);
+                      for (var node in list.whereType<Superset>().toList()) {
+                        node.children.removeWhere((leaf) =>
+                        leaf.summary.split(' - ').first == old);
+                        if (node.children.isEmpty) {
+                          list.remove(node);
+                        }
                       }
                     });
                   });
