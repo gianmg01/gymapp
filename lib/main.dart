@@ -52,14 +52,11 @@ class _GymTrackerAppState extends State<GymTrackerApp> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    // Theme
     final isDark = prefs.getBool('settings.themeIsDark') ?? false;
     settings.themeMode = isDark ? ThemeMode.dark : ThemeMode.light;
-    // Weight unit
     final wu = prefs.getString('settings.weightUnit') ?? 'metric';
     settings.weightUnit =
     wu == 'imperial' ? WeightUnit.imperial : WeightUnit.metric;
-    // Cardio unit
     final cu = prefs.getString('settings.cardioUnit') ?? 'km';
     settings.cardioUnit = cu == 'miles'
         ? CardioUnit.miles
@@ -96,6 +93,11 @@ class _MainScreenState extends State<MainScreen> {
   final Map<String, List<ExerciseNode>> exercisesPerDay = {};
   int supersetCounter = 1;
 
+  String _extractName(String summary) {
+    final firstLine = summary.split('\n').first;
+    return firstLine.split(' - ').first.trim();
+  }
+
   List<ExerciseNode> get items {
     final key = _dateKey(selectedDate);
     return exercisesPerDay.putIfAbsent(key, () => []);
@@ -125,14 +127,15 @@ class _MainScreenState extends State<MainScreen> {
     final raw = prefs.getString('exercises');
     if (raw == null) return;
     final Map<String, dynamic> jsonMap = jsonDecode(raw);
-    final Map<String, List<ExerciseNode>> loaded = {};
+    final loaded = <String, List<ExerciseNode>>{};
     jsonMap.forEach((date, list) {
       if (list is List) {
         final nodes = <ExerciseNode>[];
         for (var item in list) {
           if (item['type'] == 'leaf') {
             final leaf = ExerciseLeaf(item['summary']);
-            leaf.note = (item['note'] as String).isNotEmpty ? item['note'] : null;
+            final note = (item['note'] as String);
+            leaf.note = note.isNotEmpty ? note : null;
             nodes.add(leaf);
           } else {
             final children = <ExerciseLeaf>[];
@@ -155,7 +158,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _saveExercises() async {
     final prefs = await SharedPreferences.getInstance();
-    final Map<String, List<Map<String, dynamic>>> jsonMap = {};
+    final jsonMap = <String, List<Map<String, dynamic>>>{};
     exercisesPerDay.forEach((date, list) {
       jsonMap[date] = list.map((node) {
         if (node is ExerciseLeaf) {
@@ -484,6 +487,174 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  Future<void> _handleFindReplace() async {
+    // 1) gather unique base names
+    final names = <String>{};
+    exercisesPerDay.values.forEach((list) {
+      for (var node in list) {
+        if (node is ExerciseLeaf) {
+          names.add(_extractName(node.summary));
+        } else if (node is Superset) {
+          node.children.forEach((leaf) {
+            names.add(_extractName(leaf.summary));
+          });
+        }
+      }
+    });
+
+    String? selected;
+    final newNameCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c2, setSt) => AlertDialog(
+          title: Text('Find & Replace'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButton<String>(
+                value: selected,
+                hint: Text('Select exercise'),
+                isExpanded: true,
+                items: names
+                    .map((n) => DropdownMenuItem(value: n, child: Text(n)))
+                    .toList(),
+                onChanged: (v) => setSt(() => selected = v),
+              ),
+              TextField(
+                controller: newNameCtrl,
+                decoration: InputDecoration(labelText: 'New name'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (selected != null && newNameCtrl.text.trim().isNotEmpty) {
+                  final oldName = selected!;
+                  final newName = newNameCtrl.text.trim();
+                  setState(() {
+                    exercisesPerDay.values.forEach((list) {
+                      for (var node in list) {
+                        if (node is ExerciseLeaf) {
+                          if (_extractName(node.summary) == oldName) {
+                            node.summary =
+                                newName + node.summary.substring(oldName.length);
+                          }
+                        } else {
+                          for (var leaf in (node as Superset).children) {
+                            if (_extractName(leaf.summary) == oldName) {
+                              leaf.summary =
+                                  newName + leaf.summary.substring(oldName.length);
+                            }
+                          }
+                        }
+                      }
+                    });
+                  });
+                  _saveExercises();
+                  Navigator.pop(c2);
+                }
+              },
+              child: Text('Replace'),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+
+  Future<void> _handleFindRemove() async {
+    // 1) gather unique base names
+    final names = <String>{};
+    exercisesPerDay.values.forEach((list) {
+      for (var node in list) {
+        if (node is ExerciseLeaf) {
+          names.add(_extractName(node.summary));
+        } else {
+          (node as Superset).children.forEach((leaf) {
+            names.add(_extractName(leaf.summary));
+          });
+        }
+      }
+    });
+
+    String? selected;
+    await showDialog(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c2, setSt) => AlertDialog(
+          title: Text('Find & Remove'),
+          content: DropdownButton<String>(
+            value: selected,
+            hint: Text('Select exercise'),
+            isExpanded: true,
+            items: names
+                .map((n) => DropdownMenuItem(value: n, child: Text(n)))
+                .toList(),
+            onChanged: (v) => setSt(() => selected = v),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (selected != null) {
+                  final oldName = selected!;
+                  setState(() {
+                    // remove standalone leaves
+                    exercisesPerDay.values.forEach((list) {
+                      list.removeWhere((node) =>
+                      node is ExerciseLeaf &&
+                          _extractName(node.summary) == oldName);
+                    });
+                    // remove inside supersets + drop empty supersets
+                    exercisesPerDay.values.forEach((list) {
+                      for (var sup in list.whereType<Superset>().toList()) {
+                        sup.children.removeWhere((leaf) =>
+                        _extractName(leaf.summary) == oldName);
+                        if (sup.children.isEmpty) list.remove(sup);
+                      }
+                    });
+                  });
+                  _saveExercises();
+                  Navigator.pop(c2);
+                }
+              },
+              child: Text('Remove'),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleDeleteAll() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Delete All Data?'),
+        content:
+        Text('This will remove ALL exercise data. Are you sure?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, true),
+              child:
+              Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      setState(() {
+        exercisesPerDay.clear();
+      });
+      _saveExercises();
+    }
+  }
+
   Widget _buildGap(int idx, {Superset? sup, int? childIndex}) {
     return DragTarget<ExerciseNode>(
       onWillAccept: (_) => true,
@@ -509,13 +680,15 @@ class _MainScreenState extends State<MainScreen> {
       },
       builder: (ctx, cand, rej) => Container(
         height: cand.isNotEmpty ? 20 : 6,
-        color:
-        cand.isNotEmpty ? Colors.blueAccent.withOpacity(0.3) : null,
+        color: cand.isNotEmpty
+            ? Colors.blueAccent.withOpacity(0.3)
+            : null,
       ),
     );
   }
 
-  Widget _buildDraggable(ExerciseNode node, {bool insideSup = false}) {
+  Widget _buildDraggable(ExerciseNode node,
+      {bool insideSup = false}) {
     return LongPressDraggable<ExerciseNode>(
       data: node,
       feedback: ConstrainedBox(
@@ -529,7 +702,8 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildNodeTile(ExerciseNode node, {bool insideSup = false}) {
+  Widget _buildNodeTile(ExerciseNode node,
+      {bool insideSup = false}) {
     if (node is Superset) {
       final idx0 = items.indexOf(node);
       return Container(
@@ -555,8 +729,8 @@ class _MainScreenState extends State<MainScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(node.name,
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
+                      style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   PopupMenuButton<String>(
                     onSelected: (v) {
                       if (v == 'edit') _editNode(node);
@@ -625,108 +799,111 @@ class _MainScreenState extends State<MainScreen> {
       final rest = parts.length > 1 ? parts.sublist(1) : null;
 
       return Container(
-          margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-          child: DragTarget<ExerciseNode>(
-            onWillAccept: (d) => d is ExerciseLeaf && d.id != leaf.id,
-            onAccept: (d) {
-              setState(() {
-                final idx1 = items.indexOf(leaf);
-                _removeNode(d);
-                _removeNode(leaf);
-                final sup = Superset(
-                    'Superset ${supersetCounter++}',
-                    children: [d as ExerciseLeaf, leaf]);
-                items.insert(idx1.clamp(0, items.length), sup);
-                _saveExercises();
-              });
-            },
-            builder: (ctx, cand, rej) => Container(
-                padding: EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                      color: cand.isNotEmpty ? Colors.blueAccent : Colors.grey),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                Row(
-                children: [
-                Icon(header.toLowerCase().contains(' in ')
-                    ? Icons.directions_run
-                    : Icons.fitness_center),
-            SizedBox(width: 12),
-            Expanded(
-              child: rest != null
-                  ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(header),
-                  for (var line in rest)
-                    Padding(
-                      padding: EdgeInsets.only(left: 16),
-                      child: Text(line),
-                    ),
-                ],
-              )
-                  : Text(header),
+        margin: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+        child: DragTarget<ExerciseNode>(
+          onWillAccept: (d) =>
+          d is ExerciseLeaf && d.id != leaf.id,
+          onAccept: (d) {
+            setState(() {
+              final idx1 = items.indexOf(leaf);
+              _removeNode(d);
+              _removeNode(leaf);
+              final sup = Superset(
+                  'Superset ${supersetCounter++}',
+                  children: [d as ExerciseLeaf, leaf]);
+              items.insert(idx1.clamp(0, items.length), sup);
+              _saveExercises();
+            });
+          },
+          builder: (ctx, cand, rej) => Container(
+            padding: EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border.all(
+                  color: cand.isNotEmpty
+                      ? Colors.blueAccent
+                      : Colors.grey),
+              borderRadius: BorderRadius.circular(8),
             ),
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'edit')
-                  _editNode(leaf);
-                else if (v == 'note')
-                  _editNote(leaf);
-                else
-                  _deleteNode(leaf);
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                    value: 'edit',
-                    child: Row(children: [
-                      Icon(Icons.edit),
-                      SizedBox(width: 8),
-                      Text('Edit')
-                    ])),
-                PopupMenuItem(
-                    value: 'note',
-                    child: Row(children: [
-                      Icon(Icons.note),
-                      SizedBox(width: 8),
-                      Text('Add Note')
-                    ])),
-                PopupMenuItem(
-                    value: 'delete',
-                    child: Row(children: [
-                      Icon(Icons.delete, color: Colors.red),
-                      SizedBox(width: 8),
-                      Text('Delete')
-                    ])),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(header.toLowerCase().contains(' in ')
+                        ? Icons.directions_run
+                        : Icons.fitness_center),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: rest != null
+                          ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(header),
+                          for (var line in rest)
+                            Padding(
+                              padding: EdgeInsets.only(left: 16),
+                              child: Text(line),
+                            ),
+                        ],
+                      )
+                          : Text(header),
+                    ),
+                    PopupMenuButton<String>(
+                      onSelected: (v) {
+                        if (v == 'edit')
+                          _editNode(leaf);
+                        else if (v == 'note')
+                          _editNote(leaf);
+                        else
+                          _deleteNode(leaf);
+                      },
+                      itemBuilder: (_) => [
+                        PopupMenuItem(
+                            value: 'edit',
+                            child: Row(children: [
+                              Icon(Icons.edit),
+                              SizedBox(width: 8),
+                              Text('Edit')
+                            ])),
+                        PopupMenuItem(
+                            value: 'note',
+                            child: Row(children: [
+                              Icon(Icons.note),
+                              SizedBox(width: 8),
+                              Text('Add Note')
+                            ])),
+                        PopupMenuItem(
+                            value: 'delete',
+                            child: Row(children: [
+                              Icon(Icons.delete, color: Colors.red),
+                              SizedBox(width: 8),
+                              Text('Delete')
+                            ])),
+                      ],
+                    ),
+                  ],
+                ),
+                if (leaf.note != null && leaf.note!.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(top: 4, left: 40),
+                    child: Text(
+                      leaf.note!,
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey[700]),
+                    ),
+                  ),
               ],
             ),
-          ]),
-          if (leaf.note != null && leaf.note!.isNotEmpty)
-      Padding(
-        padding: EdgeInsets.only(top: 4, left: 40),
-        child: Text(
-          leaf.note!,
-          style:
-          TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
         ),
-      ),
-    ],
-    ),
-    ),
-    ),
-    );
-  }
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final rows = <Widget>[];
 
-    // Date navigation
     rows.add(Padding(
       padding: EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -734,17 +911,16 @@ class _MainScreenState extends State<MainScreen> {
         children: [
           IconButton(
               icon: Icon(Icons.chevron_left),
-              onPressed: () => setState(() {
-                selectedDate =
-                    selectedDate.subtract(Duration(days: 1));
-              })),
+              onPressed: () => setState(() =>
+              selectedDate =
+                  selectedDate.subtract(Duration(days: 1)))),
           Text(_friendly(selectedDate),
               style: TextStyle(fontSize: 18)),
           IconButton(
               icon: Icon(Icons.chevron_right),
-              onPressed: () => setState(() {
-                selectedDate = selectedDate.add(Duration(days: 1));
-              })),
+              onPressed: () => setState(() =>
+              selectedDate =
+                  selectedDate.add(Duration(days: 1)))),
         ],
       ),
     ));
@@ -790,8 +966,13 @@ class _MainScreenState extends State<MainScreen> {
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
-                  builder: (_) =>
-                      SettingsScreen(settings: widget.settings)),
+                builder: (_) => SettingsScreen(
+                  settings: widget.settings,
+                  onFindReplace: _handleFindReplace,
+                  onFindRemove: _handleFindRemove,
+                  onDeleteAll: _handleDeleteAll,
+                ),
+              ),
             ),
           ),
         ]),

@@ -3,16 +3,24 @@ import 'main.dart'; // for Settings, WeightUnit, CardioUnit
 
 class SettingsScreen extends StatelessWidget {
   final Settings settings;
-  const SettingsScreen({super.key, required this.settings});
+  final VoidCallback onFindReplace;
+  final VoidCallback onFindRemove;
+  final VoidCallback onDeleteAll;
+
+  const SettingsScreen({
+    super.key,
+    required this.settings,
+    required this.onFindReplace,
+    required this.onFindRemove,
+    required this.onDeleteAll,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // Section headers use a larger, bold style
     final sectionStyle = Theme.of(context)
         .textTheme
         .headline6
         ?.copyWith(fontWeight: FontWeight.bold);
-    // Setting labels slightly smaller but still bold
     final labelStyle = Theme.of(context)
         .textTheme
         .subtitle1
@@ -23,22 +31,18 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         children: [
-          // -- Section: Display --
+          // Display section
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Text("Display", style: sectionStyle),
           ),
           Divider(thickness: 2),
-
-          // Dark Mode
           SwitchListTile(
             title: Text("Dark Mode", style: labelStyle),
             value: settings.themeMode == ThemeMode.dark,
             onChanged: (val) => settings.toggleTheme(val),
           ),
           Divider(),
-
-          // Weightlifting Units
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text("Weightlifting Units", style: labelStyle),
@@ -61,8 +65,6 @@ class SettingsScreen extends StatelessWidget {
             ],
           ),
           Divider(),
-
-          // Cardio Units
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text("Cardio Units", style: labelStyle),
@@ -87,6 +89,28 @@ class SettingsScreen extends StatelessWidget {
                 child: Text("Imperial (feet)"),
               ),
             ],
+          ),
+          Divider(thickness: 2),
+
+          // Manage Data section
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text("Manage Data", style: sectionStyle),
+          ),
+          Divider(thickness: 2),
+          ListTile(
+            title: Text("Find & Replace", style: labelStyle),
+            onTap: onFindReplace,
+          ),
+          Divider(),
+          ListTile(
+            title: Text("Find & Remove", style: labelStyle),
+            onTap: onFindRemove,
+          ),
+          Divider(),
+          ListTile(
+            title: Text("Delete All Data", style: labelStyle?.copyWith(color: Colors.red)),
+            onTap: onDeleteAll,
           ),
           Divider(),
         ],
